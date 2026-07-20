@@ -40,8 +40,16 @@ const summarize = (state) => ({
 });
 console.log("board:", JSON.stringify(summarize(latest), null, 2));
 if (title) {
-  const added = await session.addTask({ title, state: "todo", body: "Filed by the headless probe." });
-  console.log("added:", added);
+  // The board API is one batched commit of file changes (the browser models
+  // its working tree locally) — the probe commits a single new task file.
+  const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "task";
+  const path = `tasks/${slug}-probe-${Date.now()}.md`;
+  const content = `---\nstate: todo\n---\n\n# ${title}\n\nFiled by the headless probe.\n`;
+  const result = await session.commitChanges({
+    message: `Add ${title} (probe)`,
+    changes: [{ path, content }],
+  });
+  console.log("committed:", result);
   await new Promise((resolve) => setTimeout(resolve, 2000));
   console.log("after:", JSON.stringify(summarize(latest), null, 2));
 }

@@ -5,7 +5,13 @@
  * module is text-in, text-out only — no storage, no network, no UI.
  */
 import { parseDocument, type Document } from "yaml";
-import { BOARD_COLUMNS, type TaskCard } from "./state.ts";
+import { BOARD_COLUMNS, type TaskCard, type TaskChangeSummary } from "./state.ts";
+import {
+  effectiveEntry,
+  textContentForEntry,
+  type FileEntry,
+  type WorkingTreeChanges,
+} from "./lib/working-tree.ts";
 
 const DEFAULT_TASK_STATE = BOARD_COLUMNS[0];
 const MAX_TASK_FILENAME_SLUG_LENGTH = 64;
@@ -80,23 +86,89 @@ export function taskPathForTitle(title: string, suffix?: string): string {
   return `tasks/${collisionBase}${suffixText}.md`;
 }
 
+/** One uncommitted task-file change, carrying the entry the commit will send. */
+export type TaskChange = TaskChangeSummary & { entry: FileEntry };
+
+/**
+ * Task-only working-tree changes for the board's badges + commit UI. Titles
+ * prefer live content, then HEAD content for pure deletions.
+ */
+export function listTaskChanges(
+  changes: WorkingTreeChanges,
+  headContents: Readonly<Record<string, string>>,
+): TaskChange[] {
+  const listed: TaskChange[] = [];
+  for (const [path, change] of changes) {
+    if (!isTaskFilePath(path)) continue;
+    const entry = effectiveEntry(change);
+    if (entry === undefined) continue;
+    const status: TaskChangeSummary["status"] =
+      entry.type === "delete" ? "deleted" : path in headContents ? "modified" : "added";
+    const content = textContentForEntry(entry) ?? headContents[path];
+    listed.push({
+      path,
+      status,
+      title: content === undefined ? taskNameForPath(path) : parseTaskCard(path, content).title,
+      entry,
+    });
+  }
+  return listed.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/**
+ * The cards the board renders: HEAD contents with the working tree laid over
+ * them — written files replace (or introduce) their card instantly, deletes
+ * remove it. This is what makes a drag repaint before any commit exists.
+ */
+export function overlayTaskCards(
+  headContents: Readonly<Record<string, string>>,
+  changes: WorkingTreeChanges,
+): TaskCard[] {
+  const contents = new Map(Object.entries(headContents));
+  for (const [path, change] of changes) {
+    if (!isTaskFilePath(path)) continue;
+    const entry = effectiveEntry(change);
+    const content = textContentForEntry(entry);
+    if (content !== undefined) contents.set(path, content);
+    else if (entry !== undefined) contents.delete(path);
+  }
+  return [...contents]
+    .map(([path, source]) => parseTaskCard(path, source))
+    .sort((a, b) => a.path.localeCompare(b.path));
+}
+
 /** Deterministic commit message when AI is unavailable or empty. */
-export function fallbackCommitMessage(
-  changes: Array<{ path: string; kind: "add" | "update" | "delete" }>,
-): string {
+export function fallbackCommitMessage(changes: readonly TaskChangeSummary[]): string {
   if (changes.length === 0) return "Update tasks";
-  const added = changes.filter((change) => change.kind === "add");
-  const updated = changes.filter((change) => change.kind === "update");
-  const deleted = changes.filter((change) => change.kind === "delete");
+  const added = changes.filter((change) => change.status === "added");
+  const modified = changes.filter((change) => change.status === "modified");
+  const deleted = changes.filter((change) => change.status === "deleted");
   const parts: string[] = [];
-  if (added.length === 1) parts.push(`add ${taskNameForPath(added[0]!.path)}`);
+  if (added.length === 1) parts.push(`add ${added[0]!.title}`);
   else if (added.length > 1) parts.push(`add ${added.length} tasks`);
-  if (updated.length === 1) parts.push(`update ${taskNameForPath(updated[0]!.path)}`);
-  else if (updated.length > 1) parts.push(`update ${updated.length} tasks`);
-  if (deleted.length === 1) parts.push(`delete ${taskNameForPath(deleted[0]!.path)}`);
+  if (modified.length === 1) parts.push(`update ${modified[0]!.title}`);
+  else if (modified.length > 1) parts.push(`update ${modified.length} tasks`);
+  if (deleted.length === 1) parts.push(`delete ${deleted[0]!.title}`);
   else if (deleted.length > 1) parts.push(`delete ${deleted.length} tasks`);
   const body = parts.join(", ");
   return body === "" ? "Update tasks" : `${body[0]!.toUpperCase()}${body.slice(1)}`;
+}
+
+/** Prompt payload for `ai.run` commit-message generation. */
+export function taskCommitMessagePrompt(changes: readonly TaskChangeSummary[]): {
+  system: string;
+  user: string;
+} {
+  const lines = changes.map((change) => {
+    const verb =
+      change.status === "added" ? "Added" : change.status === "deleted" ? "Deleted" : "Edited";
+    return `- ${verb}: ${change.title} (${change.path})`;
+  });
+  return {
+    system:
+      "You write short git commit messages for a task board. Reply with one line only, imperative mood, no quotes, no trailing period, max 72 characters.",
+    user: `Write a commit message for these task changes:\n${lines.join("\n")}`,
+  };
 }
 
 /**
@@ -112,6 +184,14 @@ export function columnsForTasks(tasks: TaskCard[]): Array<{ state: string; tasks
     state,
     tasks: tasks.filter((task) => normalizeTaskState(task.state) === state),
   }));
+}
+
+/**
+ * The column a literal state lands in — the drag guard uses this so dropping
+ * a legacy `backlog` card back onto Todo never rewrites its file.
+ */
+export function taskColumnState(state: string): string {
+  return normalizeTaskState(state);
 }
 
 /**

@@ -3,13 +3,18 @@ import { RpcTarget, newWebSocketRpcSession, newWorkersRpcResponse } from "capnwe
 import type { RpcStub } from "capnweb";
 import { LiveState, LiveStateRpcTarget } from "iterate/live-state";
 import type { Project, UnauthenticatedOs } from "iterate/client";
-import type { BoardApi, BoardState, TaskCard } from "./state.ts";
+import type {
+  BoardApi,
+  BoardState,
+  CommitResult,
+  RepoFileChange,
+  TaskChangeSummary,
+} from "./state.ts";
 import {
   fallbackCommitMessage,
-  newTaskFile,
+  isTaskFilePath,
   parseTaskCard,
-  setTaskCardState,
-  taskPathForTitle,
+  taskCommitMessagePrompt,
 } from "./tasks-model.ts";
 
 /** Worker + DO bindings. No secrets — auth is the per-connection session token. */
@@ -22,6 +27,8 @@ const CONFIG_REPO = "/repos/config";
 const POLL_INTERVAL_MS = 30_000;
 const PROJECT_ID_HEADER = "x-itx-project-id";
 const AUTH_COOKIE = "iterate-project-auth";
+/** Same model the apps/os tasks board asks for its commit one-liners. */
+const TASK_COMMIT_MODEL = "openai/gpt-5.5";
 
 /**
  * One board = one Durable Object, named by the project id stamped by the
@@ -92,69 +99,50 @@ export class TasksBoardDurableObject extends DurableObject<AppEnv> {
     }
   }
 
-  async commit(
+  /**
+   * One git commit of the browser's accumulated working tree. The vessel only
+   * ever writes task markdown — any other path in the batch is rejected before
+   * it can touch the config repo's code. Refreshes the shared board after, so
+   * every connected browser repaints from the new HEAD.
+   */
+  async commitChanges(
     project: RpcStub<Project>,
     projectId: string,
-    message: string,
-    changes: Array<{ path: string; content: string } | { path: string; delete: true }>,
-  ): Promise<void> {
-    await project.repos.get(CONFIG_REPO).commitFiles({ message, changes });
-    await this.refresh(project, projectId);
-  }
-
-  #tasks(): TaskCard[] {
-    return this.#live.getState().tasks;
-  }
-
-  async addTask(
-    project: RpcStub<Project>,
-    projectId: string,
-    input: { title: string; body?: string; state?: string },
-  ): Promise<{ path: string }> {
-    const title = input.title.trim();
-    if (!title) throw new Error("a task needs a title");
-    const existing = new Set(this.#tasks().map((task) => task.path));
-    let file = newTaskFile({ title, body: input.body, state: input.state });
-    for (let suffix = 2; existing.has(file.path); suffix++) {
-      file = { ...file, path: taskPathForTitle(title, `${suffix}`) };
+    input: { message: string; changes: RepoFileChange[] },
+  ): Promise<CommitResult> {
+    const message = input.message.trim();
+    if (!message) throw new Error("a commit needs a message");
+    if (input.changes.length === 0) throw new Error("nothing to commit");
+    for (const change of input.changes) {
+      if (!isTaskFilePath(change.path)) {
+        throw new Error(`${change.path} is not a task file — the board only commits tasks/ markdown`);
+      }
     }
-    await this.commit(project, projectId, fallbackCommitMessage([{ path: file.path, kind: "add" }]), [
-      { path: file.path, content: file.content },
-    ]);
-    return { path: file.path };
+    const result = (await project.repos
+      .get(CONFIG_REPO)
+      .commitFiles({ message, changes: input.changes })) as CommitResult;
+    await this.refresh(project, projectId);
+    return result;
   }
 
-  async moveTask(
+  /**
+   * AI one-liner for a pending change set, via the project's own Workers AI
+   * capability on the calling session. Deterministic fallback when the model
+   * returns nothing; a thrown AI error falls back client-side the same way.
+   */
+  async generateCommitMessage(
     project: RpcStub<Project>,
-    projectId: string,
-    input: { path: string; state: string },
-  ): Promise<void> {
-    const task = this.#tasks().find((candidate) => candidate.path === input.path);
-    if (!task) throw new Error(`no task at ${input.path}`);
-    if (task.state === input.state) return;
-    await this.commit(project, projectId, fallbackCommitMessage([{ path: input.path, kind: "update" }]), [
-      { path: input.path, content: setTaskCardState(task.source, input.state) },
-    ]);
-  }
-
-  async updateTask(
-    project: RpcStub<Project>,
-    projectId: string,
-    input: { path: string; source: string },
-  ): Promise<void> {
-    await this.commit(project, projectId, fallbackCommitMessage([{ path: input.path, kind: "update" }]), [
-      { path: input.path, content: input.source },
-    ]);
-  }
-
-  async deleteTask(
-    project: RpcStub<Project>,
-    projectId: string,
-    input: { path: string },
-  ): Promise<void> {
-    await this.commit(project, projectId, fallbackCommitMessage([{ path: input.path, kind: "delete" }]), [
-      { path: input.path, delete: true },
-    ]);
+    input: { changes: TaskChangeSummary[] },
+  ): Promise<string> {
+    const prompt = taskCommitMessagePrompt(input.changes);
+    const result = (await project.ai.run(TASK_COMMIT_MODEL, {
+      messages: [
+        { role: "system", content: prompt.system },
+        { role: "user", content: prompt.user },
+      ],
+    })) as { response?: string };
+    const generated = result.response?.trim().replace(/^["']|["']$/g, "");
+    return generated ? generated.slice(0, 72) : fallbackCommitMessage(input.changes);
   }
 
   liveState(): LiveStateRpcTarget<BoardState> {
@@ -300,20 +288,12 @@ class BoardSession extends RpcTarget implements BoardApi {
     return this.board.liveState();
   }
 
-  addTask(input: { title: string; body?: string; state?: string }): Promise<{ path: string }> {
-    return this.#withProject((project) => this.board.addTask(project, this.projectId, input));
+  commitChanges(input: { message: string; changes: RepoFileChange[] }): Promise<CommitResult> {
+    return this.#withProject((project) => this.board.commitChanges(project, this.projectId, input));
   }
 
-  moveTask(input: { path: string; state: string }): Promise<void> {
-    return this.#withProject((project) => this.board.moveTask(project, this.projectId, input));
-  }
-
-  updateTask(input: { path: string; source: string }): Promise<void> {
-    return this.#withProject((project) => this.board.updateTask(project, this.projectId, input));
-  }
-
-  deleteTask(input: { path: string }): Promise<void> {
-    return this.#withProject((project) => this.board.deleteTask(project, this.projectId, input));
+  generateCommitMessage(input: { changes: TaskChangeSummary[] }): Promise<string> {
+    return this.#withProject((project) => this.board.generateCommitMessage(project, input));
   }
 
   refresh(): Promise<void> {

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Stateless Kanban vessel for iterate project tasks/ — TanStack Start on Cloudflare Workers, proxied per-project with project-app-session auth",
+  "description": "Stateless Kanban vessel for iterate project tasks/ \u2014 TanStack Start on Cloudflare Workers, proxied per-project with project-app-session auth",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build && tsc --noEmit",
@@ -26,6 +26,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.2",
+    "captun": "https://github.com/iterate/captun/releases/download/v0.0.3-websocket.6aa1207/captun-0.0.3.tgz",
     "typescript": "^5.9.2",
     "vite": "^8.0.16",
     "wrangler": "4.107.0"

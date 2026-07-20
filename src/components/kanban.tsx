@@ -1,39 +1,53 @@
 import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
-import type { BoardApi, BoardState, TaskCard } from "../state.ts";
+import type { TaskCard, TaskChangeStatus } from "../state.ts";
 import { columnsForTasks } from "../tasks-model.ts";
+import { ChangeStatusMark } from "./commit-controls.tsx";
 
 /**
  * The board: columns from `columnsForTasks`, native HTML5 drag & drop for
- * moves, a per-column inline "+ add", and a detail overlay per card. No
- * optimistic state anywhere — every mutation just awaits the api call and the
- * pushed live-state patch repaints the board (controls disable in flight).
+ * moves, a per-column inline "+ add", and a detail overlay per card. Every
+ * mutation here is SYNCHRONOUS and LOCAL — a working-tree write that repaints
+ * this render, no network anywhere. The commit surface (routes/index.tsx)
+ * turns the accumulated changes into git commits later.
  */
-export function Kanban({ board, api }: { board: BoardState; api: BoardApi | null }) {
+export function Kanban({
+  tasks,
+  taskChangeByPath,
+  onMove,
+  onAdd,
+  onWrite,
+  onDiscard,
+  onDelete,
+}: {
+  tasks: TaskCard[];
+  /** Uncommitted status per changed path — cards wear an A/M mark. */
+  taskChangeByPath: ReadonlyMap<string, TaskChangeStatus>;
+  onMove: (task: TaskCard, state: string) => void;
+  onAdd: (title: string, state: string) => void;
+  /** Write-through from the detail editor: the full markdown source. */
+  onWrite: (task: TaskCard, source: string) => void;
+  /** Revert a card's local edits back to its baseline. */
+  onDiscard: (path: string) => void;
+  onDelete: (task: TaskCard) => void;
+}) {
   const [dragPath, setDragPath] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  const [moving, setMoving] = useState(false);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
 
-  const columns = columnsForTasks(board.tasks);
+  const columns = columnsForTasks(tasks);
   const selectedTask = selectedPath
-    ? (board.tasks.find((task) => task.path === selectedPath) ?? null)
+    ? (tasks.find((task) => task.path === selectedPath) ?? null)
     : null;
 
-  const dropOn = async (event: DragEvent<HTMLDivElement>, state: string) => {
+  const dropOn = (event: DragEvent<HTMLDivElement>, state: string) => {
     event.preventDefault();
     setDropTarget(null);
     const path = event.dataTransfer.getData("text/plain") || dragPath;
     setDragPath(null);
-    if (!path || api === null || moving) return;
-    const task = board.tasks.find((candidate) => candidate.path === path);
-    if (!task || task.state === state) return;
-    setMoving(true);
-    try {
-      await api.moveTask({ path, state });
-    } finally {
-      setMoving(false);
-    }
+    if (!path) return;
+    const task = tasks.find((candidate) => candidate.path === path);
+    if (task) onMove(task, state);
   };
 
   return (
@@ -51,7 +65,7 @@ export function Kanban({ board, api }: { board: BoardState; api: BoardApi | null
                 setDropTarget((current) => (current === column.state ? null : current));
               }
             }}
-            onDrop={(event) => void dropOn(event, column.state)}
+            onDrop={(event) => dropOn(event, column.state)}
             style={{
               flex: "0 0 15rem",
               background: dropTarget === column.state ? "#161b21" : "#101317",
@@ -79,7 +93,7 @@ export function Kanban({ board, api }: { board: BoardState; api: BoardApi | null
               <Card
                 key={task.path}
                 task={task}
-                draggable={api !== null && !moving}
+                changeStatus={taskChangeByPath.get(task.path)}
                 dragging={dragPath === task.path}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", task.path);
@@ -90,13 +104,7 @@ export function Kanban({ board, api }: { board: BoardState; api: BoardApi | null
                 onOpen={() => setSelectedPath(task.path)}
               />
             ))}
-            <AddTask
-              state={column.state}
-              api={api}
-              // Adding while a drag-move is committing would race the same
-              // board; one in-flight mutation at a time keeps it legible.
-              disabled={moving}
-            />
+            <AddTask state={column.state} onAdd={onAdd} />
           </div>
         ))}
       </div>
@@ -104,7 +112,10 @@ export function Kanban({ board, api }: { board: BoardState; api: BoardApi | null
         <TaskDetail
           key={selectedTask.path}
           task={selectedTask}
-          api={api}
+          changeStatus={taskChangeByPath.get(selectedTask.path)}
+          onWrite={onWrite}
+          onDiscard={onDiscard}
+          onDelete={onDelete}
           onClose={() => setSelectedPath(null)}
         />
       ) : null}
@@ -114,14 +125,14 @@ export function Kanban({ board, api }: { board: BoardState; api: BoardApi | null
 
 function Card({
   task,
-  draggable,
+  changeStatus,
   dragging,
   onDragStart,
   onDragEnd,
   onOpen,
 }: {
   task: TaskCard;
-  draggable: boolean;
+  changeStatus: TaskChangeStatus | undefined;
   dragging: boolean;
   onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
@@ -130,7 +141,7 @@ function Card({
   const hasDots = task.labels.length > 0 || task.agent !== null;
   return (
     <div
-      draggable={draggable}
+      draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
@@ -154,7 +165,10 @@ function Card({
         gap: "0.35rem",
       }}
     >
-      <span style={{ fontSize: "0.85rem", overflowWrap: "anywhere" }}>{task.title}</span>
+      <span style={{ display: "flex", alignItems: "baseline", gap: "0.4rem" }}>
+        <span style={{ flex: 1, fontSize: "0.85rem", overflowWrap: "anywhere" }}>{task.title}</span>
+        {changeStatus !== undefined ? <ChangeStatusMark status={changeStatus} /> : null}
+      </span>
       {hasDots ? (
         <span style={{ display: "flex", gap: "0.3rem", alignItems: "center" }}>
           {task.labels.map((label) => (
@@ -207,30 +221,16 @@ function labelColor(label: string): string {
   return `hsl(${Math.abs(hash) % 360} 55% 55%)`;
 }
 
-function AddTask({
-  state,
-  api,
-  disabled,
-}: {
-  state: string;
-  api: BoardApi | null;
-  disabled: boolean;
-}) {
+function AddTask({ state, onAdd }: { state: string; onAdd: (title: string, state: string) => void }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
-  const [busy, setBusy] = useState(false);
 
-  const add = async () => {
+  const add = () => {
     const trimmed = title.trim();
-    if (!trimmed || api === null) return;
-    setBusy(true);
-    try {
-      await api.addTask({ title: trimmed, state });
-      setTitle("");
-      setOpen(false);
-    } finally {
-      setBusy(false);
-    }
+    if (!trimmed) return;
+    onAdd(trimmed, state);
+    setTitle("");
+    setOpen(false);
   };
 
   if (!open) {
@@ -238,7 +238,6 @@ function AddTask({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        disabled={api === null || disabled}
         style={{
           background: "transparent",
           border: "none",
@@ -255,7 +254,7 @@ function AddTask({
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        void add();
+        add();
       }}
     >
       <input
@@ -270,7 +269,6 @@ function AddTask({
         }}
         placeholder="task title"
         aria-label={`add task to ${state}`}
-        disabled={busy}
         style={{ width: "100%", fontSize: "0.85rem" }}
       />
     </form>
@@ -279,18 +277,19 @@ function AddTask({
 
 function TaskDetail({
   task,
-  api,
+  changeStatus,
+  onWrite,
+  onDiscard,
+  onDelete,
   onClose,
 }: {
   task: TaskCard;
-  api: BoardApi | null;
+  changeStatus: TaskChangeStatus | undefined;
+  onWrite: (task: TaskCard, source: string) => void;
+  onDiscard: (path: string) => void;
+  onDelete: (task: TaskCard) => void;
   onClose: () => void;
 }) {
-  // Local draft only — a live-state push while editing must not clobber the
-  // textarea. The component is keyed by path, so a different card remounts it.
-  const [source, setSource] = useState(task.source);
-  const [busy, setBusy] = useState(false);
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -298,27 +297,6 @@ function TaskDetail({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
-
-  const save = async () => {
-    if (api === null) return;
-    setBusy(true);
-    try {
-      await api.updateTask({ path: task.path, source });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async () => {
-    if (api === null || !window.confirm(`Delete ${task.path}?`)) return;
-    setBusy(true);
-    try {
-      await api.deleteTask({ path: task.path });
-      onClose();
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div
@@ -351,14 +329,17 @@ function TaskDetail({
           <code style={{ color: "#9aa3ad", fontSize: "0.8rem", flex: 1, overflowWrap: "anywhere" }}>
             {task.path}
           </code>
+          {changeStatus !== undefined ? <ChangeStatusMark status={changeStatus} /> : null}
           <button type="button" onClick={onClose}>
             Close
           </button>
         </div>
+        {/* Write-through: every keystroke is a working-tree edit. The value is
+            the effective source, so reverting (or a matching HEAD refresh)
+            repaints the textarea from the same single source of truth. */}
         <textarea
-          value={source}
-          onChange={(event) => setSource(event.target.value)}
-          disabled={busy}
+          value={task.source}
+          onChange={(event) => onWrite(task, event.target.value)}
           spellCheck={false}
           style={{
             flex: 1,
@@ -370,17 +351,28 @@ function TaskDetail({
           }}
         />
         <div style={{ display: "flex", gap: "0.5rem" }}>
-          <button type="button" onClick={() => void save()} disabled={busy || api === null}>
-            Save
+          <button
+            type="button"
+            onClick={() => onDiscard(task.path)}
+            disabled={changeStatus === undefined}
+            title="Revert this card's uncommitted edits"
+          >
+            Revert
           </button>
           <button
             type="button"
-            onClick={() => void remove()}
-            disabled={busy || api === null}
+            onClick={() => {
+              if (!window.confirm(`Delete ${task.path}?`)) return;
+              onDelete(task);
+              onClose();
+            }}
             style={{ color: "#e6b3b8" }}
           >
             Delete
           </button>
+          <span style={{ marginLeft: "auto", alignSelf: "center", color: "#6b7280", fontSize: "0.75rem" }}>
+            {changeStatus === undefined ? "in sync with HEAD" : "uncommitted local change"}
+          </span>
         </div>
       </div>
     </div>

@@ -2,9 +2,15 @@ import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import { defineConfig } from "vite";
+import captunVite from "captun/vite";
 
 export default defineConfig({
   plugins: [
+    // Public local URL (HTTP + WS) when CAPTUN_TUNNEL_NAME is set — see the
+    // "Developing your app against a live project" section of the platform's
+    // remote-apps guide: point a production project's proxy at the tunnel via
+    // itx.kv and develop this app against real data.
+    captunVite(),
     // The worker (src/worker.ts, with its TasksBoardDurableObject) runs in
     // workerd during dev; wrangler.jsonc declares the BOARD binding.
     cloudflare({ viteEnvironment: { name: "ssr" } }),
