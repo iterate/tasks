@@ -93,6 +93,7 @@ function BoardPage({ project }: { project: string }) {
             {" · "}
             {board.tasks.length} task{board.tasks.length === 1 ? "" : "s"}
           </p>
+          <CapabilityPanel project={project} />
         </>
       )}
     </div>
@@ -142,6 +143,86 @@ function ErrorCard({ message, children }: { message: string; children?: ReactNod
       <span style={{ color: "#e6b3b8", flex: 1 }}>{message}</span>
       {children}
     </div>
+  );
+}
+
+/**
+ * The outbound half of the pairing: the capability key the PLATFORM must
+ * present when it dials this board back as `itx.tasks`. Fetched only when a
+ * signed-in human opens the disclosure — it never rides the live state.
+ */
+function CapabilityPanel({ project }: { project: string }) {
+  const [key, setKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const reveal = async () => {
+    try {
+      const response = await fetch(`/api/capability-key/${project}`);
+      if (!response.ok) throw new Error(await response.text());
+      const body = (await response.json()) as { capabilityKey: string | null };
+      setKey(body.capabilityKey);
+    } catch (thrown) {
+      setError(thrown instanceof Error ? thrown.message : String(thrown));
+    }
+  };
+
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const wsOrigin = origin.replace(/^http/, "ws");
+  const recipe = `await itx.capabilityHosts.get("/").runScript(\`async (itx) => {
+  await itx.secrets.get("/secrets/tasks-app").create({
+    egress: { urls: ["${origin}"] },
+    material: { apiKey: "<capability key>" },
+  });
+  await itx.capabilityHosts.get("/").provideCapability({
+    type: "itx-expression",
+    path: ["tasks"],
+    expression: ["remoteCapability", ["get", "${wsOrigin}/capability/${project}", {
+      headers: { authorization: 'Bearer getSecret({ path: "/secrets/tasks-app", field: "apiKey" })' },
+    }]],
+    instructions: "The project Kanban board. tasks.add(title, body?) files a task; tasks.list() reads it.",
+  });
+}\`);`;
+
+  return (
+    <details style={{ marginTop: "1.5rem", maxWidth: "44rem" }}>
+      <summary style={{ color: "#6b7280", fontSize: "0.85rem", cursor: "pointer" }}>
+        Connect to platform (mount this board as itx.tasks)
+      </summary>
+      <div
+        style={{
+          marginTop: "0.75rem",
+          background: "#22262c",
+          border: "1px solid #2a2f36",
+          borderRadius: "8px",
+          padding: "1rem",
+          fontSize: "0.85rem",
+        }}
+      >
+        {key === null ? (
+          <button type="button" onClick={() => void reveal()}>
+            reveal capability key
+          </button>
+        ) : (
+          <code style={{ wordBreak: "break-all" }}>{key}</code>
+        )}
+        {error ? <p style={{ color: "#e6b3b8" }}>{error}</p> : null}
+        <p style={{ color: "#9aa3ad", margin: "0.75rem 0 0.4rem" }}>
+          Run this in a project script (the runScript wrapper keeps the mount durable):
+        </p>
+        <pre
+          style={{
+            overflowX: "auto",
+            background: "#0b0d10",
+            border: "1px solid #2a2f36",
+            borderRadius: "6px",
+            padding: "0.75rem",
+            fontSize: "0.75rem",
+          }}
+        >
+          {recipe}
+        </pre>
+      </div>
+    </details>
   );
 }
 
