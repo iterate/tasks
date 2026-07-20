@@ -57,7 +57,9 @@ async function open(secret: string, sealed: string | undefined): Promise<Record<
   if (!body || !mac) return null;
   if ((await hmac(secret, body)) !== mac) return null;
   try {
-    const padded = body.replaceAll("-", "+").replaceAll("_", "/");
+    // seal() strips base64 padding; workerd's atob is strict, so restore it.
+    const swapped = body.replaceAll("-", "+").replaceAll("_", "/");
+    const padded = swapped + "=".repeat((4 - (swapped.length % 4)) % 4);
     const json = JSON.parse(atob(padded)) as Record<string, unknown> & { exp?: number };
     if (typeof json.exp !== "number" || json.exp < Date.now()) return null;
     return json;
