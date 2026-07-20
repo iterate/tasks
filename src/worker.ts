@@ -2,9 +2,9 @@ import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { env as workerEnv } from "cloudflare:workers";
 import { getServerByName } from "partyserver";
 import type { TasksBoardDurableObject } from "./board-do.ts";
-import type { TasksCheckoutDurableObject } from "./checkout-do.ts";
+import { ProjectDial, type TasksCheckoutDurableObject } from "./checkout-do.ts";
 import type { AppEnv } from "./board-do.ts";
-import { isCheckoutId } from "./lib/checkout-shared.ts";
+import { isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
 export { TasksBoardDurableObject } from "./board-do.ts";
 export { TasksCheckoutDurableObject } from "./checkout-do.ts";
@@ -132,8 +132,30 @@ export default createServerEntry({
       return env.BOARD.getByName(projectId).fetch(request);
     }
 
-    // Collaborative checkouts: one y-partyserver DO per (project, checkout
-    // id). WebSocket upgrades speak stock y-protocols sync/awareness; POSTs
+    // The picker's repo list: dial the platform as the requesting user and
+    // read the project's repo catalog. (Not /api/repos — on project hosts
+    // the platform ingress owns that namespace and answers before the
+    // config worker's proxy runs.)
+    if (url.pathname === "/api/checkout-repos") {
+      const token = readCookie(request, "iterate-project-auth");
+      if (!token) return new Response("missing session token", { status: 403 });
+      const dial = new ProjectDial(env.OS_BASE_URL, projectId, token);
+      try {
+        const repos = (await dial.withProject((project) => project.repos.list())) as Array<{
+          path: string;
+        }>;
+        return Response.json(repos.map((repo) => repo.path).sort());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return new Response(message, { status: 502 });
+      } finally {
+        dial.close();
+      }
+    }
+
+    // Collaborative checkouts: one y-partyserver DO per (project, repo,
+    // checkout id) — the repo rides as ?repoPath= and is bound into the DO
+    // name. WebSocket upgrades speak stock y-protocols sync/awareness; POSTs
     // to /commit and /generate-message are the git ops (Server.fetch routes
     // non-upgrade requests to onRequest).
     const checkout = /^\/api\/checkout\/([^/]+)(?:\/(?:commit|generate-message))?$/.exec(
@@ -141,12 +163,13 @@ export default createServerEntry({
     );
     if (checkout) {
       const checkoutId = decodeURIComponent(checkout[1]!);
-      if (!isCheckoutId(checkoutId)) {
-        return new Response("bad checkout id", { status: 400 });
+      const repoPath = normalizeRepoPath(url.searchParams.get("repoPath"));
+      if (!isCheckoutId(checkoutId) || repoPath === null) {
+        return new Response("bad checkout id or repo path", { status: 400 });
       }
       const stub = await getServerByName(
         env.CHECKOUT as unknown as Parameters<typeof getServerByName>[0],
-        `${projectId}:${checkoutId}`,
+        `${projectId}:${repoPath}:${checkoutId}`,
       );
       return stub.fetch(request);
     }
@@ -158,3 +181,12 @@ export default createServerEntry({
     return handler.fetch(request);
   },
 });
+
+function readCookie(request: Request, name: string): string | undefined {
+  const header = request.headers.get("cookie") ?? "";
+  for (const part of header.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
+  }
+  return undefined;
+}

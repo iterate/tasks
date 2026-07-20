@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import YProvider from "y-partyserver/provider";
 import type { CommitResult, TaskChangeSummary } from "../state.ts";
+import { DEFAULT_REPO_PATH } from "./checkout-shared.ts";
 
 export type CheckoutStatus = "connecting" | "connected" | "ready" | "disconnected";
 
@@ -11,7 +12,7 @@ export type CheckoutStatus = "connecting" | "connected" | "ready" | "disconnecte
  * the shared Y.Doc and everyone's presence. Auth is invisible here — the
  * project proxy stamps the session cookie on the upgrade like any request.
  */
-export function useCheckout(checkoutId: string) {
+export function useCheckout(checkoutId: string, repoPath: string) {
   const [handle, setHandle] = useState<{ provider: YProvider; doc: Y.Doc } | null>(null);
 
   useEffect(() => {
@@ -19,8 +20,9 @@ export function useCheckout(checkoutId: string) {
     // Change counter for useSyncExternalStore (the state vector alone would
     // miss deletions). Registered before any subscriber so it bumps first.
     doc.on("update", () => docVersions.set(doc, (docVersions.get(doc) ?? 0) + 1));
-    const provider = new YProvider(window.location.host, checkoutId, doc, {
+    const provider = new YProvider(window.location.host, `${repoPath}:${checkoutId}`, doc, {
       prefix: `/api/checkout/${encodeURIComponent(checkoutId)}`,
+      params: { repoPath },
     });
     provider.awareness.setLocalStateField("user", localCollabUser());
     setHandle({ provider, doc });
@@ -29,7 +31,7 @@ export function useCheckout(checkoutId: string) {
       provider.destroy();
       doc.destroy();
     };
-  }, [checkoutId]);
+  }, [checkoutId, repoPath]);
 
   const provider = handle?.provider ?? null;
   const doc = handle?.doc ?? null;
@@ -99,12 +101,14 @@ export function useCheckout(checkoutId: string) {
 const docVersions = new WeakMap<Y.Doc, number>();
 
 /** POST a git op to the checkout's DO. Cookies (auth) ride along same-origin. */
-export async function postCheckoutOp<T>(
+async function postCheckoutOp<T>(
   checkoutId: string,
+  repoPath: string,
   op: "commit" | "generate-message",
   body: { message?: string; changes?: TaskChangeSummary[] },
 ): Promise<T> {
-  const response = await fetch(`/api/checkout/${encodeURIComponent(checkoutId)}/${op}`, {
+  const query = repoPath === DEFAULT_REPO_PATH ? "" : `?repoPath=${encodeURIComponent(repoPath)}`;
+  const response = await fetch(`/api/checkout/${encodeURIComponent(checkoutId)}/${op}${query}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -113,15 +117,27 @@ export async function postCheckoutOp<T>(
   return (await response.json()) as T;
 }
 
-export function commitCheckoutOp(checkoutId: string, message: string): Promise<CommitResult> {
-  return postCheckoutOp<CommitResult>(checkoutId, "commit", { message });
+export function commitCheckoutOp(
+  checkoutId: string,
+  repoPath: string,
+  message: string,
+): Promise<CommitResult> {
+  return postCheckoutOp<CommitResult>(checkoutId, repoPath, "commit", { message });
 }
 
 export function generateCheckoutMessageOp(
   checkoutId: string,
+  repoPath: string,
   changes: TaskChangeSummary[],
 ): Promise<string> {
-  return postCheckoutOp<string>(checkoutId, "generate-message", { changes });
+  return postCheckoutOp<string>(checkoutId, repoPath, "generate-message", { changes });
+}
+
+/** The project's repos, for the landing-page picker. */
+export async function listRepos(): Promise<string[]> {
+  const response = await fetch("/api/checkout-repos");
+  if (!response.ok) throw new Error(await response.text());
+  return (await response.json()) as string[];
 }
 
 /** The identity this browser collaborates as — persisted locally, renameable. */

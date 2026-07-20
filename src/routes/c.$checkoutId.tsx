@@ -4,12 +4,14 @@ import type { ReactNode } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
 import {
+  DEFAULT_REPO_PATH,
   applyTextEdit,
   checkoutBaseCommit,
   checkoutBaseContents,
   checkoutFileContents,
   checkoutFilesMap,
   checkoutTaskChanges,
+  normalizeRepoPath,
 } from "../lib/checkout-shared.ts";
 import {
   commitCheckoutOp,
@@ -33,7 +35,15 @@ import { CommitControls, DeletedTasksStrip } from "../components/commit-controls
 import { Kanban, type PresenceUser } from "../components/kanban.tsx";
 import { TaskEditor } from "../components/task-editor.tsx";
 
-export const Route = createFileRoute("/c/$checkoutId")({ component: CheckoutPage });
+export const Route = createFileRoute("/c/$checkoutId")({
+  validateSearch: (search: Record<string, unknown>): { repoPath?: string } => {
+    const repoPath = normalizeRepoPath(
+      typeof search.repoPath === "string" ? search.repoPath : null,
+    );
+    return repoPath === null || repoPath === DEFAULT_REPO_PATH ? {} : { repoPath };
+  },
+  component: CheckoutPage,
+});
 
 /** Everything the board derives from the shared doc, recomputed per doc change. */
 type CheckoutSnapshot = {
@@ -54,7 +64,11 @@ type CheckoutSnapshot = {
  */
 function CheckoutPage() {
   const { checkoutId } = Route.useParams();
-  const { provider, doc, status, docVersion, awarenessVersion } = useCheckout(checkoutId);
+  const repoPath = Route.useSearch().repoPath ?? DEFAULT_REPO_PATH;
+  const { provider, doc, status, docVersion, awarenessVersion } = useCheckout(
+    checkoutId,
+    repoPath,
+  );
 
   const snapshot = useMemo<CheckoutSnapshot | null>(() => {
     if (doc === null) return null;
@@ -104,6 +118,11 @@ function CheckoutPage() {
         <h1 style={{ fontSize: "1.2rem", margin: 0 }}>
           <span style={{ color: "#6b7280", fontWeight: 400 }}>checkout / </span>
           {checkoutId}
+          {repoPath === DEFAULT_REPO_PATH ? null : (
+            <code style={{ color: "#9aa3ad", fontSize: "0.8rem", marginLeft: "0.5rem" }}>
+              {repoPath}
+            </code>
+          )}
         </h1>
         <PresenceStrip provider={provider} peers={peers} />
         <span style={{ flex: 1 }} />
@@ -120,6 +139,7 @@ function CheckoutPage() {
       ) : (
         <ReadyCheckout
           checkoutId={checkoutId}
+          repoPath={repoPath}
           provider={provider}
           doc={doc}
           snapshot={snapshot}
@@ -132,12 +152,14 @@ function CheckoutPage() {
 
 function ReadyCheckout({
   checkoutId,
+  repoPath,
   provider,
   doc,
   snapshot,
   peers,
 }: {
   checkoutId: string;
+  repoPath: string;
   provider: YProvider;
   doc: Y.Doc;
   snapshot: CheckoutSnapshot;
@@ -179,9 +201,10 @@ function ReadyCheckout({
 
   const api = useMemo<CommitMessageApi>(
     () => ({
-      generateCommitMessage: (input) => generateCheckoutMessageOp(checkoutId, input.changes),
+      generateCommitMessage: (input) =>
+        generateCheckoutMessageOp(checkoutId, repoPath, input.changes),
     }),
-    [checkoutId],
+    [checkoutId, repoPath],
   );
 
   const commitCheckout = useCallback(
@@ -193,6 +216,7 @@ function ReadyCheckout({
       try {
         await commitCheckoutOp(
           checkoutId,
+          repoPath,
           message ??
             fallbackCommitMessage(
               checkoutTaskChanges(checkoutFileContents(doc), checkoutBaseContents(doc)),
@@ -206,7 +230,7 @@ function ReadyCheckout({
         setCommitPending(false);
       }
     },
-    [checkoutId, doc],
+    [checkoutId, repoPath, doc],
   );
 
   const commit = useTaskCommit({

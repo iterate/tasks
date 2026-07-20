@@ -18,9 +18,8 @@ import {
   checkoutFilesMap,
   checkoutMetaMap,
   checkoutRepoChanges,
+  normalizeRepoPath,
 } from "./lib/checkout-shared.ts";
-
-const CONFIG_REPO = "/repos/config";
 const PROJECT_ID_HEADER = "x-itx-project-id";
 const AUTH_COOKIE = "iterate-project-auth";
 const TASK_COMMIT_MODEL = "openai/gpt-5.5";
@@ -28,7 +27,9 @@ const DOC_STORAGE_KEY = "doc";
 
 /**
  * One collaborative checkout = one y-partyserver YServer Durable Object,
- * named `<projectId>:<checkoutId>`. The stock mixin does all the Yjs work —
+ * named `<projectId>:<repoPath>:<checkoutId>` (any of the project's repos —
+ * the picker on `/` chooses; /repos/config is the default). The stock mixin
+ * does all the Yjs work —
  * y-protocols sync + awareness relay over `/api/checkout/<id>` WebSockets
  * (the standard y-websocket wire, so the stock provider and editor bindings
  * just work) plus a debounced `onSave`. This subclass only adds:
@@ -60,7 +61,8 @@ export class TasksCheckoutDurableObject extends YServer {
 
   override async onConnect(connection: Connection, ctx: ConnectionContext): Promise<void> {
     try {
-      await this.#withDial(ctx.request, (dial) => this.#verifyAndSeed(dial));
+      const repoPath = repoPathFromRequest(ctx.request);
+      await this.#withDial(ctx.request, (dial) => this.#verifyAndSeed(dial, repoPath));
     } catch (error) {
       connection.close(4403, `session rejected: ${errorText(error)}`.slice(0, 120));
       return;
@@ -69,9 +71,9 @@ export class TasksCheckoutDurableObject extends YServer {
   }
 
   /** listTaskFiles both proves the token works and provides the seed. */
-  async #verifyAndSeed(dial: ProjectDial): Promise<void> {
+  async #verifyAndSeed(dial: ProjectDial, repoPath: string): Promise<void> {
     const listing = (await dial.withProject((project) =>
-      project.repos.get(CONFIG_REPO).listTaskFiles(),
+      project.repos.get(repoPath).listTaskFiles(),
     )) as { commitOid: string; files: Record<string, string> };
     // Re-check after the await: a racing join may have seeded already.
     if (checkoutBaseCommit(this.document) !== undefined) return;
@@ -94,13 +96,14 @@ export class TasksCheckoutDurableObject extends YServer {
       return new Response("not found", { status: 404 });
     }
     try {
+      const repoPath = repoPathFromRequest(request);
       const body = (await request.json()) as {
         message?: string;
         changes?: TaskChangeSummary[];
       };
       const result = await this.#withDial<CommitResult | string>(request, (dial) =>
         op === "commit"
-          ? this.#commit(dial, body.message ?? "")
+          ? this.#commit(dial, repoPath, body.message ?? "")
           : this.#generateCommitMessage(dial, body.changes ?? []),
       );
       return Response.json(result);
@@ -116,7 +119,7 @@ export class TasksCheckoutDurableObject extends YServer {
    * flight stays visibly uncommitted — and the meta update syncs the new
    * base to every collaborator.
    */
-  async #commit(dial: ProjectDial, message: string): Promise<CommitResult> {
+  async #commit(dial: ProjectDial, repoPath: string, message: string): Promise<CommitResult> {
     const trimmed = message.trim();
     if (!trimmed) throw new Error("a commit needs a message");
     const files = checkoutFileContents(this.document);
@@ -136,7 +139,7 @@ export class TasksCheckoutDurableObject extends YServer {
       }
     }
     const result = (await dial.withProject((project) =>
-      project.repos.get(CONFIG_REPO).commitFiles({ message: trimmed, changes }),
+      project.repos.get(repoPath).commitFiles({ message: trimmed, changes }),
     )) as CommitResult;
     this.document.transact(() => {
       const meta = checkoutMetaMap(this.document);
@@ -180,7 +183,7 @@ export class TasksCheckoutDurableObject extends YServer {
  * once when a cached session goes stale mid-operation. Same
  * `project-app-session` handshake the board sessions use.
  */
-class ProjectDial {
+export class ProjectDial {
   #project: RpcStub<Project> | null = null;
   #socket: WebSocket | null = null;
   #session: { [Symbol.dispose]?: () => void } | null = null;
@@ -246,6 +249,17 @@ class ProjectDial {
     this.#closed = true;
     this.#dispose();
   }
+}
+
+/**
+ * The repo this checkout edits, from the `?repoPath=` query the worker also
+ * bound into the DO's name — so every request a given instance sees carries
+ * the same value. Absent means /repos/config.
+ */
+function repoPathFromRequest(request: Request): string {
+  const repoPath = normalizeRepoPath(new URL(request.url).searchParams.get("repoPath"));
+  if (repoPath === null) throw new Error("bad repoPath");
+  return repoPath;
 }
 
 function errorText(error: unknown): string {

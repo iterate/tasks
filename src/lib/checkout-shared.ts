@@ -112,6 +112,25 @@ export function applyTextEdit(text: Y.Text, next: string): void {
   else transact();
 }
 
+/** The repo a checkout edits when none is picked. */
+export const DEFAULT_REPO_PATH = "/repos/config";
+
+/**
+ * A checkout's repo path must be a clean `/repos/...` path — it becomes part
+ * of a Durable Object name and a git-API target, so reject anything with
+ * empty, dotted, or exotic segments. Returns null when invalid.
+ */
+export function normalizeRepoPath(value: string | null | undefined): string | null {
+  if (value === null || value === undefined || value === "") return DEFAULT_REPO_PATH;
+  if (!value.startsWith("/repos/")) return null;
+  const segments = value.slice(1).split("/");
+  if (segments.length < 2) return null;
+  for (const segment of segments) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(segment)) return null;
+  }
+  return value;
+}
+
 /** Shareable checkout id: date-time prefix for humans, random tail for uniqueness. */
 export function newCheckoutId(now: Date = new Date()): string {
   const pad = (value: number) => String(value).padStart(2, "0");
