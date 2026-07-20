@@ -23,7 +23,7 @@
     // are set with `wrangler secret put`.
     "OS_BASE_URL": "https://os.iterate.com",
     "AUTH_ISSUER": "https://auth.iterate.com/api/auth",
-    "AUTH_CLIENT_ID": "",
+    "AUTH_CLIENT_ID": "axNuubCYYCypaLiUoaLjXsbwCWaTKcDm",
     "PUBLIC_BASE_URL": "https://tasks.iterate.workers.dev",
   },
 }

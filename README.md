@@ -37,7 +37,11 @@ session cookie. The project API key never reaches a browser.
    so commits from anywhere else (the dashboard, an agent) show up too.
 
 To let the platform file tasks (`itx.tasks.add`), take the capability key
-shown on the board page and, from any project script:
+shown on the board page and run this **from an in-scope project script** (an
+agent script, or wrapped in `itx.capabilityHosts.get("/").runScript(...)` —
+a mount provided directly from an external client session is revoked when
+that session closes, because `provideCapability` returns an ownership handle
+that revokes on disposal):
 
 ```ts
 await itx.secrets.get("/secrets/tasks-app").create({
