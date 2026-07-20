@@ -16,22 +16,31 @@ Per connection the vessel:
    `commitFiles` — the git history of the config repo *is* the board's
    history, attributed to the connected user.
 
-Board edits are modelled like local git changes, the same way the iterate
-monorepo's repo-ide tasks view (apps/os) does it. The browser keeps a
-git-shaped working tree (`src/lib/working-tree.ts`) laid over the HEAD
-checkout: dragging a card, editing its markdown, adding or deleting a task
-each produce an instant local file change — the UI repaints in the same
-render, no network round trip. Changed cards wear an A/M mark, pending
-deletions stay visible (and reversible) in a strip above the board, and the
-working tree persists in localStorage keyed by project + HEAD commit, so a
-reload keeps uncommitted edits. The Commit button — or a 60s idle autosave —
-flushes the accumulated changes as ONE `commitFiles` batch, with a typed
-message, an AI-generated one (`ai.run` on the caller's session), or a
-deterministic summary.
+The board is a **collaborative checkout**: loading `/` creates one and
+redirects to its shareable `/c/<checkout-id>` URL. A checkout is a
+[y-partyserver](https://github.com/cloudflare/partykit) `YServer` Durable
+Object (named `<projectId>:<checkoutId>`) holding an in-DO working copy of
+the repo's task files as one Yjs doc — a `files` map of path → `Y.Text`
+plus a `meta` map with the base commit it was seeded from at first join.
+Everyone on the link edits the same doc over the stock y-protocols
+WebSocket wire (`/api/checkout/<id>`): drags, adds, deletes, and each
+keystroke in the CodeMirror task editor sync live, with presence chips and
+named, colored remote cursors (y-codemirror.next + awareness). The doc
+persists as one update blob in DO storage (debounced `onSave`), so a
+checkout survives eviction.
 
-There is no pairing form, no OIDC client, no DO storage, and no capability
-door. One in-memory Durable Object per project (named by project id) fans
-live state out to every open browser; when nobody is connected it is idle.
+Changed cards wear an A/M mark against the base commit, pending deletions
+stay visible (and reversible) in a strip above the board, and the Commit
+button — or a 60s idle autosave — POSTs to the DO, which flushes the doc's
+diff against base as ONE `commitFiles` batch attributed to the poster:
+typed message, AI-generated one (`/generate-message` via `ai.run`), or a
+deterministic summary. The new base syncs back through the doc, clearing
+everyone's marks. External commits to the repo are ignored while a checkout
+lives — start a fresh checkout to pick up a new HEAD.
+
+There is no pairing form, no OIDC client, and no capability door. The only
+DO state is the Yjs blob; auth is per-join and per-op (the token is
+verified by using it against the platform).
 
 ## Using it
 
@@ -73,14 +82,13 @@ Wire that class into the project's app router the same way as the seeded
 `https://tasks--<slug>.iterate.app/` — sign-in is the platform's project-
 member gate; the board UI is this app at `/`.
 
-Drag cards, add tasks, click a card to edit its markdown. Changes apply
-instantly as uncommitted working-tree edits; commit them from the Commit
-button (the ▾ panel reviews the change set, writes an AI commit message, or
-discards everything), or let the 60s idle autosave commit with a generated
-summary. The board also re-reads the repo every 30s while someone is
-connected, so commits from elsewhere (dashboard, agent) show up — note that a
-HEAD moved by someone else orphans your uncommitted edits, exactly like the
-apps/os board.
+Drag cards, add tasks, click a card to edit its markdown together —
+everyone on the checkout link sees the same board, each other's chips, and
+each other's cursors in the editor. Commit from the Commit button (the ▾
+panel reviews the change set, writes an AI commit message, or discards
+everything), or let the 60s idle autosave commit with a generated summary.
+A checkout is pinned to the base commit it was seeded from; `/` always
+starts a fresh one from HEAD.
 
 Hitting `tasks.iterate.workers.dev` directly serves only a landing page with
 the same proxy snippet — no project context, no board.

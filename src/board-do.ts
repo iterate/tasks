@@ -20,6 +20,7 @@ import {
 /** Worker + DO bindings. No secrets — auth is the per-connection session token. */
 export type AppEnv = {
   BOARD: DurableObjectNamespace;
+  CHECKOUT: DurableObjectNamespace;
   OS_BASE_URL: string;
 };
 

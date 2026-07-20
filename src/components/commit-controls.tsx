@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { TaskChangeStatus } from "../state.ts";
-import type { TaskChange } from "../tasks-model.ts";
+import type { TaskChangeStatus, TaskChangeSummary } from "../state.ts";
 
 const STATUS_LETTER: Record<TaskChangeStatus, string> = {
   added: "A",
@@ -55,7 +54,7 @@ export function CommitControls({
   onWriteCommitMessage,
   onDiscardAll,
 }: {
-  taskChanges: readonly TaskChange[];
+  taskChanges: readonly TaskChangeSummary[];
   commitMessage: string;
   onCommitMessageChange: (message: string) => void;
   commitPending: boolean;
@@ -241,7 +240,7 @@ export function DeletedTasksStrip({
   deletedChanges,
   onRestore,
 }: {
-  deletedChanges: readonly TaskChange[];
+  deletedChanges: readonly TaskChangeSummary[];
   onRestore: (path: string) => void;
 }) {
   if (deletedChanges.length === 0) return null;

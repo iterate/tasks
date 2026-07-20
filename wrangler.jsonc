@@ -9,12 +9,20 @@
       "type": "durable-object",
       "storage": "sqlite",
     },
+    "TasksCheckoutDurableObject": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
   },
   "durable_objects": {
     "bindings": [
       {
         "name": "BOARD",
         "class_name": "TasksBoardDurableObject",
+      },
+      {
+        "name": "CHECKOUT",
+        "class_name": "TasksCheckoutDurableObject",
       },
     ],
   },

@@ -1,35 +1,41 @@
 import { useEffect, useState } from "react";
-import type { DragEvent } from "react";
+import type { DragEvent, ReactNode } from "react";
 import type { TaskCard, TaskChangeStatus } from "../state.ts";
 import { columnsForTasks } from "../tasks-model.ts";
 import { ChangeStatusMark } from "./commit-controls.tsx";
 
+/** Who is looking at (or editing) a card right now — from awareness. */
+export type PresenceUser = { name: string; color: string };
+
 /**
  * The board: columns from `columnsForTasks`, native HTML5 drag & drop for
  * moves, a per-column inline "+ add", and a detail overlay per card. Every
- * mutation here is SYNCHRONOUS and LOCAL — a working-tree write that repaints
- * this render, no network anywhere. The commit surface (routes/index.tsx)
- * turns the accumulated changes into git commits later.
+ * mutation here is SYNCHRONOUS and LOCAL — an edit to the shared checkout
+ * doc that repaints this render. The commit surface turns the checkout's
+ * accumulated diff into git commits later. The detail editor itself is
+ * injected via `renderEditor` (the collaborative CodeMirror view).
  */
 export function Kanban({
   tasks,
   taskChangeByPath,
+  presenceByPath,
   onMove,
   onAdd,
-  onWrite,
   onDiscard,
   onDelete,
+  renderEditor,
 }: {
   tasks: TaskCard[];
   /** Uncommitted status per changed path — cards wear an A/M mark. */
   taskChangeByPath: ReadonlyMap<string, TaskChangeStatus>;
+  /** Collaborators with a card's file open — cards wear their colored dots. */
+  presenceByPath: ReadonlyMap<string, PresenceUser[]>;
   onMove: (task: TaskCard, state: string) => void;
   onAdd: (title: string, state: string) => void;
-  /** Write-through from the detail editor: the full markdown source. */
-  onWrite: (task: TaskCard, source: string) => void;
   /** Revert a card's local edits back to its baseline. */
   onDiscard: (path: string) => void;
   onDelete: (task: TaskCard) => void;
+  renderEditor: (task: TaskCard) => ReactNode;
 }) {
   const [dragPath, setDragPath] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
@@ -94,6 +100,7 @@ export function Kanban({
                 key={task.path}
                 task={task}
                 changeStatus={taskChangeByPath.get(task.path)}
+                presence={presenceByPath.get(task.path) ?? []}
                 dragging={dragPath === task.path}
                 onDragStart={(event) => {
                   event.dataTransfer.setData("text/plain", task.path);
@@ -113,11 +120,13 @@ export function Kanban({
           key={selectedTask.path}
           task={selectedTask}
           changeStatus={taskChangeByPath.get(selectedTask.path)}
-          onWrite={onWrite}
+          presence={presenceByPath.get(selectedTask.path) ?? []}
           onDiscard={onDiscard}
           onDelete={onDelete}
           onClose={() => setSelectedPath(null)}
-        />
+        >
+          {renderEditor(selectedTask)}
+        </TaskDetail>
       ) : null}
     </>
   );
@@ -126,6 +135,7 @@ export function Kanban({
 function Card({
   task,
   changeStatus,
+  presence,
   dragging,
   onDragStart,
   onDragEnd,
@@ -133,6 +143,7 @@ function Card({
 }: {
   task: TaskCard;
   changeStatus: TaskChangeStatus | undefined;
+  presence: readonly PresenceUser[];
   dragging: boolean;
   onDragStart: (event: DragEvent<HTMLDivElement>) => void;
   onDragEnd: () => void;
@@ -167,6 +178,21 @@ function Card({
     >
       <span style={{ display: "flex", alignItems: "baseline", gap: "0.4rem" }}>
         <span style={{ flex: 1, fontSize: "0.85rem", overflowWrap: "anywhere" }}>{task.title}</span>
+        {presence.map((user, index) => (
+          <span
+            key={`${user.name}-${index}`}
+            title={`${user.name} has this open`}
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              background: user.color,
+              boxShadow: `0 0 0 2px ${user.color}44`,
+              flex: "none",
+              alignSelf: "center",
+            }}
+          />
+        ))}
         {changeStatus !== undefined ? <ChangeStatusMark status={changeStatus} /> : null}
       </span>
       {hasDots ? (
@@ -278,17 +304,20 @@ function AddTask({ state, onAdd }: { state: string; onAdd: (title: string, state
 function TaskDetail({
   task,
   changeStatus,
-  onWrite,
+  presence,
   onDiscard,
   onDelete,
   onClose,
+  children,
 }: {
   task: TaskCard;
   changeStatus: TaskChangeStatus | undefined;
-  onWrite: (task: TaskCard, source: string) => void;
+  presence: readonly PresenceUser[];
   onDiscard: (path: string) => void;
   onDelete: (task: TaskCard) => void;
   onClose: () => void;
+  /** The collaborative editor for this task's file. */
+  children: ReactNode;
 }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -329,27 +358,27 @@ function TaskDetail({
           <code style={{ color: "#9aa3ad", fontSize: "0.8rem", flex: 1, overflowWrap: "anywhere" }}>
             {task.path}
           </code>
+          {presence.map((user, index) => (
+            <span
+              key={`${user.name}-${index}`}
+              style={{
+                color: user.color,
+                fontSize: "0.75rem",
+                border: `1px solid ${user.color}66`,
+                borderRadius: "999px",
+                padding: "0.05rem 0.5rem",
+                flex: "none",
+              }}
+            >
+              {user.name}
+            </span>
+          ))}
           {changeStatus !== undefined ? <ChangeStatusMark status={changeStatus} /> : null}
           <button type="button" onClick={onClose}>
             Close
           </button>
         </div>
-        {/* Write-through: every keystroke is a working-tree edit. The value is
-            the effective source, so reverting (or a matching HEAD refresh)
-            repaints the textarea from the same single source of truth. */}
-        <textarea
-          value={task.source}
-          onChange={(event) => onWrite(task, event.target.value)}
-          spellCheck={false}
-          style={{
-            flex: 1,
-            minHeight: "16rem",
-            fontFamily: "ui-monospace, monospace",
-            fontSize: "0.8rem",
-            resize: "none",
-            background: "#0b0d10",
-          }}
-        />
+        {children}
         <div style={{ display: "flex", gap: "0.5rem" }}>
           <button
             type="button"
@@ -371,7 +400,7 @@ function TaskDetail({
             Delete
           </button>
           <span style={{ marginLeft: "auto", alignSelf: "center", color: "#6b7280", fontSize: "0.75rem" }}>
-            {changeStatus === undefined ? "in sync with HEAD" : "uncommitted local change"}
+            {changeStatus === undefined ? "in sync with the base commit" : "uncommitted change"}
           </span>
         </div>
       </div>

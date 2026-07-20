@@ -1,14 +1,19 @@
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { env as workerEnv } from "cloudflare:workers";
+import { getServerByName } from "partyserver";
 import type { TasksBoardDurableObject } from "./board-do.ts";
+import type { TasksCheckoutDurableObject } from "./checkout-do.ts";
 import type { AppEnv } from "./board-do.ts";
+import { isCheckoutId } from "./lib/checkout-shared.ts";
 
 export { TasksBoardDurableObject } from "./board-do.ts";
+export { TasksCheckoutDurableObject } from "./checkout-do.ts";
 
 // wrangler.jsonc declares exactly these; the app is small enough that a
 // hand-written env type beats generated worker configuration types.
 const env = workerEnv as unknown as AppEnv & {
   BOARD: DurableObjectNamespace<TasksBoardDurableObject>;
+  CHECKOUT: DurableObjectNamespace<TasksCheckoutDurableObject>;
 };
 
 const PROJECT_ID_HEADER = "x-itx-project-id";
@@ -125,6 +130,25 @@ export default createServerEntry({
     // everything else is the TanStack Start app (board UI at `/` + assets).
     if (url.pathname === "/api/board") {
       return env.BOARD.getByName(projectId).fetch(request);
+    }
+
+    // Collaborative checkouts: one y-partyserver DO per (project, checkout
+    // id). WebSocket upgrades speak stock y-protocols sync/awareness; POSTs
+    // to /commit and /generate-message are the git ops (Server.fetch routes
+    // non-upgrade requests to onRequest).
+    const checkout = /^\/api\/checkout\/([^/]+)(?:\/(?:commit|generate-message))?$/.exec(
+      url.pathname,
+    );
+    if (checkout) {
+      const checkoutId = decodeURIComponent(checkout[1]!);
+      if (!isCheckoutId(checkoutId)) {
+        return new Response("bad checkout id", { status: 400 });
+      }
+      const stub = await getServerByName(
+        env.CHECKOUT as unknown as Parameters<typeof getServerByName>[0],
+        `${projectId}:${checkoutId}`,
+      );
+      return stub.fetch(request);
     }
 
     if (url.pathname === "/api/health") {
