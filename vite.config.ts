@@ -22,7 +22,15 @@ export default defineConfig({
     // "Developing your app against a live project" section of the platform's
     // remote-apps guide: point a production project's proxy at the tunnel via
     // itx.kv and develop this app against real data.
-    captunVite(),
+    ...(process.env.CAPTUN_TUNNEL_NAME?.trim()
+      ? [
+          captunVite({
+            gateway: process.env.CAPTUN_GATEWAY?.trim() || "https://tunnels.iterate.com",
+            name: process.env.CAPTUN_TUNNEL_NAME.trim(),
+            token: process.env.CAPTUN_TOKEN?.trim() || undefined,
+          }),
+        ]
+      : []),
     // The worker (src/worker.ts, with its TasksBoardDurableObject) runs in
     // workerd during dev; wrangler.jsonc declares the BOARD binding.
     cloudflare({ viteEnvironment: { name: "ssr" } }),

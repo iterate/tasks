@@ -48,11 +48,14 @@ export class TasksApp extends IterateWorkerEntrypoint {
     const auth = await itx.auth.get({ policy: "project-member" }).fetch(req);
     if (auth) return auth;
 
-    // (b) transparent proxy: pages, assets, and WebSocket upgrades
+    // (b) transparent proxy: pages, assets, and WebSocket upgrades.
+    // The kv knob points the proxy at a dev tunnel instead of the deployed
+    // vessel (see "Developing against a live project" in the tasks repo's
+    // README); absent knob means production behavior.
     const description = await itx.__describe();
     const url = new URL(req.url);
     url.protocol = "https:";
-    url.host = "tasks.iterate.workers.dev";
+    url.host = (await itx.kv.get("tasks-app-origin")) ?? "tasks.iterate.workers.dev";
     const headers = new Headers(req.headers);
     headers.set("x-itx-project-id", description.projectId);
     return fetch(new Request(url, {
@@ -86,29 +89,69 @@ the same proxy snippet — no project context, no board.
 
 ```bash
 pnpm install
-cp .dev.vars.example .dev.vars   # point OS_BASE_URL at a local os dev server
+cp .dev.vars.example .dev.vars
 pnpm dev
 ```
 
-Locally you still need to stamp `x-itx-project-id` and a valid
-`iterate-project-auth` cookie on requests (a small proxy, or
-`scripts/probe-board-authed.mjs`) — the vessel does not mint sessions.
+`.dev.vars.example` points `OS_BASE_URL` at `https://os.iterate.com` — the
+develop-against-production loop below, which is the loop you usually want.
+Point it at a local os dev server (`http://localhost:<port>`) to run fully
+local instead. Either way the vessel does not mint sessions: requests need
+the `x-itx-project-id` header and a valid `iterate-project-auth` cookie
+stamped on them (a project's proxy does this; headless, use
+`scripts/probe-board-authed.mjs`).
 
 ## Developing against a live project
 
-Run the dev server behind a captun tunnel and point a real project's proxy at
-your laptop (full guide: the platform's remote-apps doc):
+The vessel is stateless and auth rides with each connection (the proxy stamps
+the project header and forwards the user's cookie; os verifies the token), so
+"deployed vessel" vs "your laptop" is just a hostname swap in the project's
+proxy. Run local dev behind a captun tunnel and flip the project's
+`tasks-app-origin` kv knob at it — you get platform login as yourself, real
+project data, every commit attributed to you, but the app code is your local
+checkout with HMR. Full guide: the platform's remote-apps doc.
+
+Prerequisite: the project's config worker reads the knob with the deployed
+host as fallback, as in the proxy snippet above.
+
+The daily loop, two commands:
 
 ```bash
-CAPTUN_TUNNEL_NAME=me-tasks CAPTUN_TOKEN=… pnpm dev
-# then, in the project whose board you're developing:
-#   itx.kv.set("tasks-app-origin", "me-tasks.tunnels.iterate.com")
-# and make the config worker's proxy read that key with the deployed host as
-# fallback. itx.kv.delete("tasks-app-origin") flips back. Per-user routing —
-# only you hit the tunnel — is in the guide too.
+# 1. in this repo — local vite dev, publicly tunneled (HTTP + WebSocket):
+CAPTUN_TUNNEL_NAME=me-tasks \
+CAPTUN_TOKEN=$(doppler secrets get CAPTUN_TOKEN --plain --project _shared --config dev) \
+pnpm dev
+
+# 2. point the project at your tunnel (from the monorepo's apps/os):
+doppler run --config prd -- pnpm cli itx run --context <project-id> \
+  -e 'await itx.kv.set("tasks-app-origin", "me-tasks.tunnels.iterate.com")'
 ```
 
-Dev-mode through a proxy needs `server.allowedHosts` (set in
+Then open `https://tasks--<slug>.iterate.app` in a normal browser. Flip back
+with `itx.kv.delete("tasks-app-origin")` — absent knob means the deployed
+vessel, byte-identical to production.
+
+Know before you dogfood:
+
+- **Prefer the per-user variant** (in the guide): the project-wide knob
+  routes *every* member's traffic — including their session cookies — to
+  your laptop while it is set. Per-user routing sends only your own sessions
+  to the tunnel; everyone else stays on the deployed vessel.
+- **Commits are real.** The board's 60s idle autosave turns test drags into
+  actual commits on the project's config repo, attributed to you. Revertable
+  via git, but be conscious of it on a production project.
+- **Live agents orphan local edits.** The board re-reads HEAD every 30s; a
+  HEAD moved by an agent or another member discards your uncommitted
+  working-tree edits (by design — see above).
+- **The tunnel exposes vite dev, not project data.** Direct hits on the
+  tunnel get only the landing page, and a forged project header without a
+  valid cookie dies at os. What is public is the dev server itself (this
+  checkout's source, HMR endpoints) — fine here, but don't reuse the pattern
+  for a repo with secrets in the checkout.
+- `OS_BASE_URL` must be `https://os.iterate.com` (the committed default) —
+  the forwarded production token means nothing to a local os.
+
+Dev-mode through any proxy needs `server.allowedHosts` (set in
 vite.config.ts) — without it, vite 403s proxied Hosts and hydration fails in
 ways that look like framework bugs.
 

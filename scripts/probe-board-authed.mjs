@@ -29,7 +29,7 @@ const socket = new WebSocket(url.toString(), {
 const session = newWebSocketRpcSession(socket);
 let latest;
 await session.liveState.subscribe((update) => {
-  if (update && typeof update === "object" && "snapshot" in update) latest = update.snapshot;
+  if (update && typeof update === "object" && update.type === "snapshot") latest = update.state;
 });
 await new Promise((resolve) => setTimeout(resolve, 1000));
 const summarize = (state) => ({
