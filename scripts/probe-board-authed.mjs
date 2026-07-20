@@ -1,16 +1,31 @@
-// Deployed-lane probe: connect to a board with a session cookie on the
-// upgrade (the way the browser does, but headless). Run from a directory
-// whose node_modules has `ws` and `capnweb`.
-//   node probe-board-authed.mjs <baseUrl> <ref> <cookie> [title]
+// Deployed-lane probe: connect to a board WebSocket the way a browser does
+// behind the project proxy. Headers must include the platform session cookie
+// and the trusted project id (the proxy stamps both; for a headless probe you
+// pass them yourself). Run from a directory whose node_modules has `ws` and
+// `capnweb`.
+//   node probe-board-authed.mjs <baseUrl> <projectId> <token> [title]
+// Cookie: iterate-project-auth=<token>
+// Header: x-itx-project-id=<projectId>
 import { WebSocket } from "ws";
 import { newWebSocketRpcSession } from "capnweb";
 
-const [baseUrl, ref, cookie, title = ""] = process.argv.slice(2);
-if (!baseUrl || !ref || !cookie) throw new Error("usage: probe-board-authed.mjs <baseUrl> <ref> <cookie> [title]");
-const url = new URL(`/api/board/${ref}`, baseUrl);
+const [baseUrl, projectId, token, title = ""] = process.argv.slice(2);
+if (!baseUrl || !projectId || !token) {
+  throw new Error(
+    "usage: probe-board-authed.mjs <baseUrl> <projectId> <token> [title]\n" +
+      "  sends cookie iterate-project-auth=<token> and header x-itx-project-id",
+  );
+}
+const url = new URL("/api/board", baseUrl);
 url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
 
-const socket = new WebSocket(url.toString(), { headers: { cookie }, handshakeTimeout: 15_000 });
+const socket = new WebSocket(url.toString(), {
+  headers: {
+    cookie: `iterate-project-auth=${token}`,
+    "x-itx-project-id": projectId,
+  },
+  handshakeTimeout: 15_000,
+});
 const session = newWebSocketRpcSession(socket);
 let latest;
 await session.liveState.subscribe((update) => {

@@ -10,8 +10,12 @@ import type { BoardApi, BoardState } from "../state.ts";
  * `useSyncExternalStore`. Mutations are plain calls on the session — the
  * server refreshes the one LiveState and every connected browser, this one
  * included, repaints from the pushed patch.
+ *
+ * The project is implicit: the reverse proxy stamps `x-itx-project-id` and
+ * the platform's `iterate-project-auth` cookie on every request, including
+ * this WebSocket upgrade.
  */
-export function useBoard(project: string) {
+export function useBoard() {
   const [api, setApi] = useState<BoardApi | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const storeRef = useRef(createLiveStateStore<BoardState>());
@@ -21,10 +25,10 @@ export function useBoard(project: string) {
     store.reset();
     setApi(null);
     setConnectionError(null);
-    const endpoint = new URL(`/api/board/${project}`, window.location.href);
+    const endpoint = new URL("/api/board", window.location.href);
     endpoint.protocol = endpoint.protocol === "https:" ? "wss:" : "ws:";
     // Hand-construct the socket (instead of passing the URL string) so we can
-    // watch close/error ourselves: a rejected upgrade (401 from the worker)
+    // watch close/error ourselves: a rejected upgrade (403 from the worker)
     // surfaces as an immediate error+close the RPC session would otherwise
     // swallow into a hung "connecting…".
     const socket = new WebSocket(endpoint.toString());
@@ -34,7 +38,7 @@ export function useBoard(project: string) {
     const onSocketDown = (event: Event) => {
       if (disposed) return;
       const reason = event instanceof CloseEvent && event.reason ? event.reason : null;
-      setConnectionError(reason ?? "connection rejected — are you signed in?");
+      setConnectionError(reason ?? "connection rejected — are you on a project host?");
     };
     socket.addEventListener("close", onSocketDown);
     socket.addEventListener("error", onSocketDown);
@@ -44,9 +48,8 @@ export function useBoard(project: string) {
       // A revision gap in the store means a missed patch; resubscribing makes
       // the server lead with a fresh snapshot, which the store folds in. The
       // disposed guard is load-bearing: the store outlives this effect (one
-      // ref across project changes), so a straggler update from this session's
-      // dying WebSocket must not repopulate it after the next effect reset it
-      // for another board.
+      // ref across remounts), so a straggler update from this session's dying
+      // WebSocket must not repopulate it after the next effect reset it.
       subscription?.unsubscribe();
       subscription = await session.liveState.subscribe((update) => {
         if (disposed) return;
@@ -76,7 +79,7 @@ export function useBoard(project: string) {
       subscription?.unsubscribe();
       session[Symbol.dispose]();
     };
-  }, [project, store]);
+  }, [store]);
 
   const state = useSyncExternalStore(store.subscribe, store.getState, () => undefined);
   return { board: state, api, connectionError };

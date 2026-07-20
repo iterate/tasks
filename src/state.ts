@@ -21,9 +21,9 @@ export const BOARD_COLUMNS = ["todo", "in-progress", "in-review", "done"] as con
 
 /** The whole board — the live-state value every connected browser mirrors. */
 export type BoardState = {
-  /** "unpaired" until a project API key is stored; "ready" once tasks are loaded. */
-  status: "unpaired" | "connecting" | "ready" | "error";
-  /** Human-readable failure when status is "error" (bad key, unreachable os, …). */
+  /** "connecting" until the first successful listTaskFiles; "ready" once tasks are loaded. */
+  status: "connecting" | "ready" | "error";
+  /** Human-readable failure when status is "error" (bad token, unreachable os, …). */
   error: string | null;
   projectId: string | null;
   /** HEAD commit the current tasks were read at. */
@@ -32,11 +32,11 @@ export type BoardState = {
 };
 
 /**
- * The Cap'n Web capability a signed-in browser holds after connecting to a
- * board's Durable Object: read side is live state (snapshot + patches), write
- * side is verbs that each become one `commitFiles` to the project's
- * /repos/config through the platform's itx /api. Shared by the server session
- * (board-do.ts) and the client hook (lib/use-board.ts).
+ * The Cap'n Web capability a browser holds after connecting to a board's
+ * Durable Object: read side is live state (snapshot + patches), write side is
+ * verbs that each become one `commitFiles` to the project's /repos/config
+ * through the platform's itx /api — attributed to the calling session's user.
+ * Shared by the server session (board-do.ts) and the client hook (lib/use-board.ts).
  */
 export type BoardApi = {
   liveState: LiveStateRpc<BoardState>;
@@ -50,28 +50,3 @@ export type BoardApi = {
   /** Re-read tasks from the repo HEAD now (also runs on a poll alarm). */
   refresh(): Promise<void>;
 };
-
-/**
- * What the PLATFORM holds when this app is mounted as an itx capability
- * (`itx.tasks.…` via remoteCapability): a deliberately small verb surface.
- * Same Durable Object, different door — the platform's dial carries the
- * board's capability key as a bearer token, never a user cookie.
- */
-export type CapabilityApi = {
-  add(title: string, body?: string): Promise<{ path: string }>;
-  list(): Promise<Array<{ path: string; title: string; state: string }>>;
-};
-
-/**
- * One project-ref grammar for everything: the home form, the /p/$project
- * page, and the worker's /api/board/<project> route all normalize with this.
- * Accepts a project id (prj_…) or slug.
- */
-export function normalizeProjectRef(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replaceAll(/[^a-z0-9_-]+/g, "-")
-    .replaceAll(/^-+|-+$/g, "")
-    .slice(0, 80);
-}

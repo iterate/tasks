@@ -1,4 +1,1 @@
 OS_BASE_URL=http://localhost:5999
-PUBLIC_BASE_URL=http://localhost:5173
-DEV_ALLOW_ANONYMOUS=1
-SESSION_SECRET=dev-not-secret

@@ -1,49 +1,88 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { normalizeProjectRef } from "../state.ts";
-import { useMe } from "../lib/use-me.ts";
+import { createFileRoute } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { useBoard } from "../lib/use-board.ts";
+import { Kanban } from "../components/kanban.tsx";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({ component: BoardPage });
 
-function Home() {
-  const navigate = useNavigate();
-  const { me, loading } = useMe();
-  const [ref, setRef] = useState("");
-  const go = (target: string) => {
-    const normalized = normalizeProjectRef(target);
-    if (normalized) void navigate({ to: "/p/$project", params: { project: normalized } });
-  };
+/**
+ * The board IS the root route. The project is implicit in the reverse proxy
+ * (`x-itx-project-id` + `iterate-project-auth` cookie); the client just dials
+ * `/api/board`.
+ */
+function BoardPage() {
+  const { board, api, connectionError } = useBoard();
+
+  if (board === undefined) {
+    return (
+      <div>
+        <BoardHeading projectId={null} />
+        {connectionError ? (
+          <ErrorCard message={connectionError} />
+        ) : (
+          <p style={{ color: "#9aa3ad" }}>connecting…</p>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div style={{ maxWidth: "36rem", margin: "3rem auto" }}>
-      <h1 style={{ fontSize: "1.4rem", margin: "0 0 0.5rem" }}>Iterate Tasks</h1>
-      <p style={{ color: "#9aa3ad", margin: "0 0 1.5rem" }}>
-        A Kanban board over the tasks/ folder of your iterate project&rsquo;s config repo.
-      </p>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          go(ref);
-        }}
-        style={{ display: "flex", gap: "0.5rem" }}
-      >
-        <input
-          value={ref}
-          onChange={(event) => setRef(event.target.value)}
-          placeholder="project id or slug"
-          aria-label="project id or slug"
-          style={{ flex: 1 }}
-        />
-        <button type="submit">open board</button>
-      </form>
-      {!loading && me === null ? (
-        <p style={{ color: "#9aa3ad", marginTop: "1.5rem" }}>
-          You&rsquo;ll need to{" "}
-          <a href={`/auth/login?next=${encodeURIComponent("/")}`} style={{ color: "#e6e8eb" }}>
-            sign in with Iterate
-          </a>{" "}
-          before a board will open.
-        </p>
+    <div>
+      <BoardHeading projectId={board.projectId} />
+      {connectionError ? <ErrorCard message={connectionError} /> : null}
+      {board.status === "connecting" ? (
+        <p style={{ color: "#9aa3ad" }}>connecting to the project repo…</p>
+      ) : board.status === "error" ? (
+        <ErrorCard message={board.error ?? "something went wrong"}>
+          <button type="button" disabled={api === null} onClick={() => void api?.refresh()}>
+            Retry
+          </button>
+        </ErrorCard>
+      ) : (
+        <>
+          <Kanban board={board} api={api} />
+          <p style={{ color: "#6b7280", fontSize: "0.8rem", marginTop: "1rem" }}>
+            {board.commitOid ? <code>{board.commitOid.slice(0, 7)}</code> : "no commit"}
+            {" · "}
+            {board.tasks.length} task{board.tasks.length === 1 ? "" : "s"}
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BoardHeading({ projectId }: { projectId: string | null }) {
+  return (
+    <h1 style={{ fontSize: "1.2rem", margin: "0 0 1rem" }}>
+      <span style={{ color: "#6b7280", fontWeight: 400 }}>board</span>
+      {projectId ? (
+        <>
+          <span style={{ color: "#6b7280", fontWeight: 400 }}> / </span>
+          {projectId}
+        </>
       ) : null}
+    </h1>
+  );
+}
+
+function ErrorCard({ message, children }: { message: string; children?: ReactNode }) {
+  return (
+    <div
+      style={{
+        maxWidth: "34rem",
+        background: "#2a1b1d",
+        border: "1px solid #4a2a2e",
+        borderRadius: "8px",
+        padding: "0.9rem 1.1rem",
+        margin: "0 0 1rem",
+        display: "flex",
+        alignItems: "center",
+        gap: "0.75rem",
+      }}
+    >
+      <span style={{ color: "#e6b3b8", flex: 1 }}>{message}</span>
+      {children}
     </div>
   );
 }

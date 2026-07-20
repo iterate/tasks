@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Kanban task board for any iterate project's /repos/config — a standalone TanStack Start app on Cloudflare Workers, mutually authenticated with os.iterate.com",
+  "description": "Stateless Kanban vessel for iterate project tasks/ — TanStack Start on Cloudflare Workers, proxied per-project with project-app-session auth",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build && tsc --noEmit",
