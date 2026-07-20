@@ -5,6 +5,18 @@ import { defineConfig } from "vite";
 import captunVite from "captun/vite";
 
 export default defineConfig({
+  server: {
+    // The vessel is served through reverse proxies (a project's config
+    // worker, a captun tunnel) whose Host headers vite's default allowlist
+    // (localhost / *.localhost / IPs) would 403 — which breaks dev-mode
+    // hydration in ways that look like TanStack bugs. Do NOT set
+    // server.origin here: it would bake loopback asset URLs into pages
+    // viewed from another host.
+    allowedHosts: true,
+  },
+  preview: {
+    allowedHosts: true,
+  },
   plugins: [
     // Public local URL (HTTP + WS) when CAPTUN_TUNNEL_NAME is set — see the
     // "Developing your app against a live project" section of the platform's

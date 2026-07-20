@@ -108,9 +108,9 @@ CAPTUN_TUNNEL_NAME=me-tasks CAPTUN_TOKEN=… pnpm dev
 # only you hit the tunnel — is in the guide too.
 ```
 
-Note: dev-mode SSR through the proxy currently trips a hydration bug
-(`dehydratedQueryClient`); until that's fixed, `pnpm run build && pnpm exec
-vite preview` behind the tunnel is the reliable loop.
+Dev-mode through a proxy needs `server.allowedHosts` (set in
+vite.config.ts) — without it, vite 403s proxied Hosts and hydration fails in
+ways that look like framework bugs.
 
 ## Deployment
 
