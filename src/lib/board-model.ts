@@ -11,6 +11,9 @@ export type BoardTask = TaskCard & {
 
 export type PresenceUser = { name: string; color: string };
 
+/** Board swimlane grouping: folder rows, tag rows, or one flat row. */
+export type RowField = "folder" | "label" | null;
+
 /** One remote collaborator, as read from Yjs awareness. */
 export type Peer = {
   id: number;

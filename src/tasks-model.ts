@@ -51,6 +51,14 @@ export function setTaskCardAgent(source: string, agentPath: string): string {
   });
 }
 
+/** Replace the task's tags (frontmatter `labels`); empty clears the key. */
+export function setTaskCardLabels(source: string, labels: readonly string[]): string {
+  return updateFrontmatter(source, (document) => {
+    if (labels.length === 0) document.delete("labels");
+    else document.set("labels", [...labels]);
+  });
+}
+
 /** The conventional agent path for a task — apps/os's repoTaskAgentPath. */
 export function taskAgentPath(repoPath: string, taskPath: string): string {
   const repoSlug = slugify(pathSegments(repoPath).at(-1) ?? "repo", 48) || "repo";

@@ -7,13 +7,20 @@ import {
   CircleEllipsisIcon,
   FolderIcon,
   PlusIcon,
+  TagIcon,
 } from "lucide-react";
 import { cn } from "../ui/utils.ts";
 import { Badge } from "../ui/badge.tsx";
 import { Button } from "../ui/button.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { columnsForTasks, taskColumnState } from "../tasks-model.ts";
-import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
+import {
+  stateLabel,
+  type BoardTask,
+  type PresenceUser,
+  type RowField,
+} from "../lib/board-model.ts";
 import { agoText, type RecentTouch } from "../lib/recency.ts";
 
 /**
@@ -33,11 +40,11 @@ export function Board({
   onOpen,
 }: {
   tasks: BoardTask[];
-  rowField: "folder" | null;
+  rowField: RowField;
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
-  onMove: (task: BoardTask, state: string, folder: string) => void;
+  onMove: (task: BoardTask, state: string, folder: string, labels?: string[]) => void;
   onAdd: (state: string, folder: string | null) => void;
   onOpen: (path: string) => void;
 }) {
@@ -56,8 +63,19 @@ export function Board({
         const row = rows.find((candidate) => candidate.key === target.rowKey);
         if (!task || !row) return;
         const folder = rowField === "folder" ? (row.value ?? task.folder) : task.folder;
-        if (taskColumnState(task.state) !== target.state || task.folder !== folder) {
-          onMove(task, target.state, folder);
+        // Dropping into another tag row re-tags the task (no-tag row clears).
+        const labels =
+          rowField === "label" && source.rowKey !== target.rowKey
+            ? row.value === null
+              ? []
+              : [row.value]
+            : undefined;
+        if (
+          taskColumnState(task.state) !== target.state ||
+          task.folder !== folder ||
+          labels !== undefined
+        ) {
+          onMove(task, target.state, folder, labels);
         }
       }}
     >
@@ -72,8 +90,14 @@ export function Board({
             >
               {rowField === null || rows.length === 1 ? null : (
                 <header className="sticky left-0 flex h-9 w-fit max-w-[calc(100vw-4rem)] items-center gap-2 px-2 text-sm font-medium">
-                  <FolderIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="truncate font-mono text-xs">{row.label}</span>
+                  {rowField === "folder" ? (
+                    <FolderIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <TagIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className={cn("truncate text-xs", rowField === "folder" && "font-mono")}>
+                    {row.label}
+                  </span>
                   <span className="text-xs tabular-nums text-muted-foreground">
                     {row.tasks.length}
                   </span>
@@ -143,7 +167,9 @@ function BoardCell({
         <header className="flex h-10 shrink-0 items-center gap-2 px-3">
           <TaskStateIcon state={state} />
           <h2 className="truncate text-sm font-medium">{stateLabel(state)}</h2>
-          <span className="text-xs tabular-nums text-muted-foreground">{tasks.length}</span>
+          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+            {tasks.length}
+          </span>
         </header>
       ) : null}
       <div className="flex min-h-0 flex-1 flex-col px-1 pb-1">
@@ -199,12 +225,11 @@ function BoardCard({
     changeWord,
     touch ? `${touch.author.name} ${touch.action} this · ${agoText(touch.at)}` : undefined,
   ].filter((line): line is string => line !== undefined);
-  return (
+  const card = (
     <button
       type="button"
       ref={ref}
       onClick={() => onOpen(task.path)}
-      title={hoverLines.length > 0 ? hoverLines.join("\n") : undefined}
       style={
         touch
           ? { boxShadow: `0 0 0 1px ${touch.author.color}, 0 0 8px 0 ${touch.author.color}40` }
@@ -250,6 +275,17 @@ function BoardCard({
       ) : null}
     </button>
   );
+  if (hoverLines.length === 0) return card;
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="block w-full" />}>{card}</TooltipTrigger>
+      <TooltipContent side="bottom" className="flex flex-col gap-0.5">
+        {hoverLines.map((line) => (
+          <span key={line}>{line}</span>
+        ))}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function TaskStateIcon({ state, className }: { state: string; className?: string }) {
@@ -268,33 +304,60 @@ export function TaskStateIcon({ state, className }: { state: string; className?:
 
 function rowGroups(
   tasks: BoardTask[],
-  rowField: "folder" | null,
+  rowField: RowField,
 ): Array<{ key: string; label: string | null; value: string | null; tasks: BoardTask[] }> {
   if (rowField === null) return [{ key: "all", label: null, value: null, tasks }];
   const groups = new Map<string, BoardTask[]>();
-  for (const task of tasks) {
-    const group = groups.get(task.folder) ?? [];
-    group.push(task);
-    groups.set(task.folder, group);
+  if (rowField === "folder") {
+    for (const task of tasks) {
+      const group = groups.get(task.folder) ?? [];
+      group.push(task);
+      groups.set(task.folder, group);
+    }
+    if (groups.size === 0) groups.set("/", []);
+    return [...groups]
+      .sort(([left], [right]) => {
+        if (left === "/") return -1;
+        if (right === "/") return 1;
+        return left.localeCompare(right);
+      })
+      .map(([folder, grouped]) => ({
+        key: `folder:${folder}`,
+        label: folder,
+        value: folder,
+        tasks: grouped,
+      }));
   }
-  if (groups.size === 0) groups.set("/", []);
+  // Tags: a task appears in every tag's row; untagged tasks share one
+  // trailing "No tag" row. The tag set is just whatever exists in the data.
+  for (const task of tasks) {
+    const labels = task.labels.length === 0 ? [""] : task.labels;
+    for (const label of labels) {
+      const group = groups.get(label) ?? [];
+      group.push(task);
+      groups.set(label, group);
+    }
+  }
+  if (groups.size === 0) groups.set("", []);
   return [...groups]
     .sort(([left], [right]) => {
-      if (left === "/") return -1;
-      if (right === "/") return 1;
+      if (left === "") return 1;
+      if (right === "") return -1;
       return left.localeCompare(right);
     })
-    .map(([folder, grouped]) => ({
-      key: `folder:${folder}`,
-      label: folder,
-      value: folder,
+    .map(([label, grouped]) => ({
+      key: `label:${label}`,
+      label: label === "" ? "No tag" : label,
+      value: label === "" ? null : label,
       tasks: grouped,
     }));
 }
 
-function parseCardId(id: string): { path: string } | null {
-  const match = /^card:([^:]+):/.exec(id);
-  return match ? { path: decodeURIComponent(match[1]!) } : null;
+function parseCardId(id: string): { path: string; rowKey: string } | null {
+  const match = /^card:([^:]+):(.+)$/.exec(id);
+  return match
+    ? { path: decodeURIComponent(match[1]!), rowKey: decodeURIComponent(match[2]!) }
+    : null;
 }
 
 function parseCellId(id: string): { rowKey: string; state: string } | null {

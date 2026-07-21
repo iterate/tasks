@@ -85,8 +85,8 @@ function PresenceAvatar({
         <Avatar className="size-6 ring-2 ring-background">
           {image === null ? null : <AvatarImage src={image} alt={name} />}
           <AvatarFallback
-            className="text-[10px] font-semibold"
-            style={{ backgroundColor: `${color}26`, color }}
+            className="text-[10px] font-semibold text-white"
+            style={{ backgroundColor: color }}
           >
             {initials(name)}
           </AvatarFallback>

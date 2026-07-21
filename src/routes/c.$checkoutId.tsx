@@ -28,6 +28,7 @@ import {
   fallbackCommitMessage,
   isTaskFilePath,
   newTaskFile,
+  setTaskCardLabels,
   setTaskCardState,
   taskColumnState,
   taskPathForTitle,
@@ -38,6 +39,7 @@ import {
   type BoardTask,
   type Peer,
   type PresenceUser,
+  type RowField,
 } from "../lib/board-model.ts";
 import { useRecentTouches, type RecentTouch } from "../lib/recency.ts";
 import { Board } from "../components/board.tsx";
@@ -57,10 +59,10 @@ import { Skeleton } from "../ui/skeleton.tsx";
 /**
  * Every piece of view state rides in the URL so any view is deep-linkable:
  * `repoPath` (omitted for the default repo), `task` (the open task sheet),
- * `q` (the board filter), `group=none` (grouping off; folder grouping is
- * the default and stays out of the URL).
+ * `q` (the board filter), `group=none|tags` (folder grouping is the
+ * default and stays out of the URL).
  */
-type CheckoutSearch = { repoPath?: string; task?: string; q?: string; group?: "none" };
+type CheckoutSearch = { repoPath?: string; task?: string; q?: string; group?: "none" | "tags" };
 
 export const Route = createFileRoute("/c/$checkoutId")({
   validateSearch: (search: Record<string, unknown>): CheckoutSearch => {
@@ -71,7 +73,7 @@ export const Route = createFileRoute("/c/$checkoutId")({
       repoPath === null || repoPath === DEFAULT_REPO_PATH ? {} : { repoPath };
     if (typeof search.task === "string" && search.task !== "") validated.task = search.task;
     if (typeof search.q === "string" && search.q !== "") validated.q = search.q;
-    if (search.group === "none") validated.group = "none";
+    if (search.group === "none" || search.group === "tags") validated.group = search.group;
     return validated;
   },
   component: CheckoutPage,
@@ -230,16 +232,20 @@ function ReadyCheckout({
   const search = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const filter = search.q ?? "";
-  const rowField: "folder" | null = search.group === "none" ? null : "folder";
+  const rowField: RowField =
+    search.group === "none" ? null : search.group === "tags" ? "label" : "folder";
   const openPath = search.task ?? null;
   const setFilter = (value: string) =>
     void navigate({
       search: (prev) => ({ ...prev, q: value === "" ? undefined : value }),
       replace: true,
     });
-  const setRowField = (value: "folder" | null) =>
+  const setRowField = (value: RowField) =>
     void navigate({
-      search: (prev) => ({ ...prev, group: value === null ? "none" : undefined }),
+      search: (prev) => ({
+        ...prev,
+        group: value === null ? "none" : value === "label" ? "tags" : undefined,
+      }),
       replace: true,
     });
   const setOpenPath = (path: string | null, options?: { replace?: boolean }) =>
@@ -338,9 +344,10 @@ function ReadyCheckout({
     if (text) applyTextEdit(text, content);
     else filesMap.set(path, new Y.Text(content));
   };
-  const moveTask = (task: BoardTask, state: string, folder: string) => {
-    const content =
+  const moveTask = (task: BoardTask, state: string, folder: string, labels?: string[]) => {
+    let content =
       taskColumnState(task.state) === state ? task.source : setTaskCardState(task.source, state);
+    if (labels !== undefined) content = setTaskCardLabels(content, labels);
     if (folder === task.folder) {
       if (content !== task.source) writeTask(task.path, content);
       return;

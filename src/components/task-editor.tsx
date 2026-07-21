@@ -2,7 +2,14 @@ import { useEffect, useRef } from "react";
 import * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import { EditorState, StateEffect, StateField } from "@codemirror/state";
-import { Decoration, EditorView, hoverTooltip, keymap, type DecorationSet } from "@codemirror/view";
+import {
+  Decoration,
+  EditorView,
+  hoverTooltip,
+  keymap,
+  WidgetType,
+  type DecorationSet,
+} from "@codemirror/view";
 import { defaultKeymap } from "@codemirror/commands";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 import { agoText, RECENT_TOUCH_TTL_MS, transactionAuthor } from "../lib/recency.ts";
@@ -50,10 +57,33 @@ const editorTheme = EditorView.theme(
 // everyone keeps typing. Hovering a glow names the author.
 // ---------------------------------------------------------------------------
 
-type GlowSpec = { from: number; to: number; color: string; name: string; at: number; id: number };
+type GlowMeta = { id: number; name: string; at: number; deleted: boolean };
+type GlowSpec = { color: string; meta: GlowMeta } & (
+  | { kind: "insert"; from: number; to: number }
+  | { kind: "delete"; pos: number; text: string }
+);
 
 const addGlow = StateEffect.define<GlowSpec>();
 const clearGlow = StateEffect.define<number>();
+
+/** Inline ghost of just-deleted text, the y-prosemirror "ychange" idea. */
+class DeletedTextWidget extends WidgetType {
+  constructor(
+    private readonly text: string,
+    private readonly color: string,
+  ) {
+    super();
+  }
+  override eq(other: DeletedTextWidget): boolean {
+    return other.text === this.text && other.color === this.color;
+  }
+  toDOM(): HTMLElement {
+    const span = document.createElement("span");
+    span.textContent = this.text;
+    span.style.cssText = `background-color:${this.color}1f;color:${this.color};text-decoration:line-through;opacity:0.85;`;
+    return span;
+  }
+}
 
 const glowField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
@@ -61,27 +91,35 @@ const glowField = StateField.define<DecorationSet>({
     let next = decorations.map(transaction.changes);
     for (const effect of transaction.effects) {
       if (effect.is(addGlow)) {
-        const { from, to, color, name, at, id } = effect.value;
-        if (to > from) {
+        const value = effect.value;
+        if (value.kind === "insert" && value.to > value.from) {
           next = next.update({
             add: [
               Decoration.mark({
                 attributes: {
                   // No border-radius: adjacent per-keystroke marks must read
                   // as ONE straight underline, not a scalloped row of pills.
-                  style: `background-color: ${color}2e; border-bottom: 1.5px solid ${color};`,
-                  "data-glow-id": String(id),
-                  "data-glow-name": name,
-                  "data-glow-at": String(at),
+                  style: `background-color: ${value.color}2e; border-bottom: 1.5px solid ${value.color};`,
                 },
-              }).range(from, to),
+                glowMeta: value.meta,
+              }).range(value.from, value.to),
+            ],
+          });
+        } else if (value.kind === "delete" && value.text !== "") {
+          next = next.update({
+            add: [
+              Decoration.widget({
+                widget: new DeletedTextWidget(value.text, value.color),
+                side: 1,
+                glowMeta: value.meta,
+              }).range(value.pos),
             ],
           });
         }
       } else if (effect.is(clearGlow)) {
-        const cleared = String(effect.value);
         next = next.update({
-          filter: (_from, _to, value) => value.spec.attributes?.["data-glow-id"] !== cleared,
+          filter: (_from, _to, value) =>
+            (value.spec as { glowMeta?: GlowMeta }).glowMeta?.id !== effect.value,
         });
       }
     }
@@ -91,24 +129,23 @@ const glowField = StateField.define<DecorationSet>({
 });
 
 const glowHover = hoverTooltip((view, pos) => {
-  let found: { from: number; to: number; name: string; at: number } | null = null;
+  let found: { from: number; to: number; meta: GlowMeta } | null = null;
   view.state.field(glowField).between(pos, pos, (from, to, value) => {
-    const name = value.spec.attributes?.["data-glow-name"];
-    const at = Number(value.spec.attributes?.["data-glow-at"]);
-    if (typeof name === "string" && Number.isFinite(at)) {
-      found = { from, to, name, at };
+    const meta = (value.spec as { glowMeta?: GlowMeta }).glowMeta;
+    if (meta !== undefined) {
+      found = { from, to, meta };
       return false;
     }
   });
-  if (found === null) return null;
-  const { from, to, name, at } = found;
+  const hit = found as { from: number; to: number; meta: GlowMeta } | null;
+  if (hit === null) return null;
   return {
-    pos: from,
-    end: to,
+    pos: hit.from,
+    end: hit.to,
     above: true,
     create: () => {
       const dom = document.createElement("div");
-      dom.textContent = `${name} · ${agoText(at)}`;
+      dom.textContent = `${hit.meta.name} · ${hit.meta.deleted ? "deleted" : "added"} · ${agoText(hit.meta.at)}`;
       return { dom };
     },
   };
@@ -200,7 +237,25 @@ export function TaskEditor({
       const author = transactionAuthor(doc, transaction);
       if (author === null) return;
 
-      const effects: Array<StateEffect<GlowSpec>> = [];
+      // Deleted content, recovered from the transaction's tombstones in
+      // creation order and consumed per delete-run below.
+      let deletedPool = [...event.changes.deleted]
+        .sort((a, b) => a.id.client - b.id.client || a.id.clock - b.id.clock)
+        .map((item) =>
+          (item.content.getContent() as unknown[])
+            .filter((part): part is string => typeof part === "string")
+            .join(""),
+        )
+        .join("");
+
+      const effects: Array<StateEffect<GlowSpec | number>> = [];
+      const expire = (id: number) => {
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          view.dispatch({ effects: clearGlow.of(id) });
+        }, RECENT_TOUCH_TTL_MS);
+        timers.add(timer);
+      };
       let index = 0;
       for (const op of event.delta) {
         if (typeof op.retain === "number") index += op.retain;
@@ -208,20 +263,29 @@ export function TaskEditor({
           const id = ++glowId;
           effects.push(
             addGlow.of({
+              kind: "insert",
               from: index,
               to: index + op.insert.length,
               color: author.color,
-              name: author.name,
-              at: Date.now(),
-              id,
+              meta: { id, name: author.name, at: Date.now(), deleted: false },
             }),
           );
-          const timer = setTimeout(() => {
-            timers.delete(timer);
-            view.dispatch({ effects: clearGlow.of(id) });
-          }, RECENT_TOUCH_TTL_MS);
-          timers.add(timer);
+          expire(id);
           index += op.insert.length;
+        } else if (typeof op.delete === "number") {
+          const deletedText = deletedPool.slice(0, op.delete);
+          deletedPool = deletedPool.slice(op.delete);
+          const id = ++glowId;
+          effects.push(
+            addGlow.of({
+              kind: "delete",
+              pos: index,
+              text: deletedText,
+              color: author.color,
+              meta: { id, name: author.name, at: Date.now(), deleted: true },
+            }),
+          );
+          expire(id);
         }
       }
       // Deferred: for LOCAL typing this observer fires inside CodeMirror's

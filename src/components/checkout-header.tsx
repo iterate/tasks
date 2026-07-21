@@ -6,8 +6,10 @@ import {
   LinkIcon,
   ListFilterIcon,
   MoreHorizontalIcon,
+  TagIcon,
   XIcon,
 } from "lucide-react";
+import type { RowField } from "../lib/board-model.ts";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -168,36 +170,55 @@ export function FilterControl({
   );
 }
 
-/** Grouping as an icon dropdown: folder rows on or off. */
+const GROUP_LABELS: Record<string, string> = {
+  folder: "Grouped by folder",
+  label: "Grouped by tag",
+  none: "No grouping",
+};
+
+/** Grouping as an icon dropdown: folder rows, tag rows, or flat. */
 export function GroupControl({
   value,
   onChange,
 }: {
-  value: "folder" | null;
-  onChange: (value: "folder" | null) => void;
+  value: RowField;
+  onChange: (value: RowField) => void;
 }) {
   return (
     <DropdownMenu>
-      <WithTooltip label={value === "folder" ? "Grouped by folder" : "No grouping"}>
+      <WithTooltip label={GROUP_LABELS[value ?? "none"]!}>
         <DropdownMenuTrigger
           render={
             <Button
-              variant={value === "folder" ? "secondary" : "outline"}
+              variant={value === null ? "outline" : "secondary"}
               size="sm"
               className={ICON_BUTTON}
               aria-label="Board grouping"
             />
           }
         >
-          <FolderTreeIcon aria-hidden className="size-3.5" />
+          {value === "label" ? (
+            <TagIcon aria-hidden className="size-3.5" />
+          ) : (
+            <FolderTreeIcon aria-hidden className="size-3.5" />
+          )}
         </DropdownMenuTrigger>
       </WithTooltip>
       <DropdownMenuContent align="end">
+        <DropdownMenuCheckboxItem checked={value === null} onCheckedChange={() => onChange(null)}>
+          No grouping
+        </DropdownMenuCheckboxItem>
         <DropdownMenuCheckboxItem
           checked={value === "folder"}
-          onCheckedChange={(checked) => onChange(checked ? "folder" : null)}
+          onCheckedChange={() => onChange("folder")}
         >
           Group by folder
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={value === "label"}
+          onCheckedChange={() => onChange("label")}
+        >
+          Group by tag
         </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -216,8 +237,8 @@ export function MobileOverflow({
 }: {
   filter: string;
   onChangeFilter: (value: string) => void;
-  group: "folder" | null;
-  onChangeGroup: (value: "folder" | null) => void;
+  group: RowField;
+  onChangeGroup: (value: RowField) => void;
 }) {
   return (
     <DropdownMenu>
@@ -246,9 +267,15 @@ export function MobileOverflow({
         </DropdownMenuItem>
         <DropdownMenuCheckboxItem
           checked={group === "folder"}
-          onCheckedChange={(checked) => onChangeGroup(checked ? "folder" : null)}
+          onCheckedChange={() => onChangeGroup(group === "folder" ? null : "folder")}
         >
           Group by folder
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={group === "label"}
+          onCheckedChange={() => onChangeGroup(group === "label" ? null : "label")}
+        >
+          Group by tag
         </DropdownMenuCheckboxItem>
       </DropdownMenuContent>
     </DropdownMenu>
