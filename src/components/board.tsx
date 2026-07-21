@@ -16,7 +16,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { taskColumnState } from "../tasks-model.ts";
 import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
-import type { BoardColumn, BoardProjection } from "../lib/board-engine.ts";
+import type { BoardProjection } from "../lib/board-engine.ts";
 import { agoText, type RecentSpan, type RecentTouch } from "../lib/recency.ts";
 
 /**
@@ -45,6 +45,10 @@ export function Board({
   onOpen: (path: string) => void;
 }) {
   const { rowField, rows, columns, filterActive } = projection;
+  const hasGroupBars = rowField !== null && rows.length > 1;
+  // The centered content's exact width: columns + gaps + wrapper padding.
+  // Group-bar labels use it to align with the leftmost column's edge.
+  const contentWidth = `calc(${columns.length * 18}rem + ${(columns.length - 1) * 0.5}rem + 1rem)`;
   const byPath = useMemo(() => {
     const map = new Map<string, BoardTask>();
     for (const row of rows) {
@@ -80,38 +84,61 @@ export function Board({
         }
       }}
     >
-      <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 p-2">
-        {/* w-max + mx-auto: wider than the viewport it scrolls as before,
-            narrower it floats centered. */}
-        <div className="mx-auto flex min-h-full w-max flex-col gap-4">
-          {rows.map((row, rowIndex) => (
-            <section
-              key={row.key}
-              className={cn("flex min-w-full flex-col", rows.length === 1 && "min-h-full flex-1")}
-            >
-              {rowField === null || rows.length === 1 ? null : (
-                <header className="sticky left-0 flex h-9 w-fit max-w-[calc(100vw-4rem)] items-center gap-2 px-2 text-sm font-medium">
-                  {rowField === "folder" ? (
-                    <FolderIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <TagIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className={cn("truncate text-xs", rowField === "folder" && "font-mono")}>
-                    {row.label}
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-background">
+        <div className="w-max min-w-full">
+          {/* Column headers: stuck to the very top of the scroll. */}
+          <div
+            className={cn(
+              "sticky top-0 z-20 min-w-full bg-background",
+              hasGroupBars && "border-b",
+            )}
+          >
+            <div className="mx-auto flex w-max gap-2 px-2">
+              {columns.map((column) => (
+                <div
+                  key={column.state}
+                  className="flex h-10 w-72 flex-none items-center gap-2 px-3"
+                >
+                  <TaskStateIcon state={column.state} />
+                  <h2 className="truncate text-sm font-medium">{stateLabel(column.state)}</h2>
+                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                    {filterActive ? `${column.visible}/${column.total}` : column.total}
                   </span>
-                  <span className="text-xs tabular-nums text-muted-foreground">{row.count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {rows.map((row) => (
+            <section key={row.key} className="min-w-full">
+              {!hasGroupBars ? null : (
+                // Full-bleed group bar. Each bar is sticky just below the
+                // column headers WITHIN its own section, so scrolling past a
+                // group hands the slot to the next bar — pure CSS.
+                <header className="sticky top-10 z-10 min-w-full border-y border-border/40 bg-muted">
+                  <div className="mx-auto min-w-0" style={{ width: contentWidth }}>
+                    <div className="sticky left-0 flex h-9 w-fit max-w-[100vw] items-center gap-2 px-3 text-sm font-medium">
+                    {rowField === "folder" ? (
+                      <FolderIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <TagIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className={cn("truncate text-xs", rowField === "folder" && "font-mono")}>
+                      {row.label}
+                    </span>
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {row.count}
+                      </span>
+                    </div>
+                  </div>
                 </header>
               )}
-              <div className="flex min-h-0 min-w-full flex-1 gap-2">
-                {row.cells.map((cell, cellIndex) => (
+              <div className="mx-auto flex w-max gap-2 px-2 py-2">
+                {row.cells.map((cell) => (
                   <BoardCell
                     key={cell.state}
                     state={cell.state}
                     rowKey={row.key}
                     rowValue={row.value}
-                    showHeader={rowIndex === 0}
-                    column={columns[cellIndex]!}
-                    filterActive={filterActive}
                     tasks={cell.tasks}
                     taskChangeByPath={taskChangeByPath}
                     presenceByPath={presenceByPath}
@@ -134,9 +161,6 @@ function BoardCell({
   state,
   rowKey,
   rowValue,
-  showHeader,
-  column,
-  filterActive,
   tasks,
   taskChangeByPath,
   presenceByPath,
@@ -148,9 +172,6 @@ function BoardCell({
   state: string;
   rowKey: string;
   rowValue: string | null;
-  showHeader: boolean;
-  column: BoardColumn;
-  filterActive: boolean;
   tasks: BoardTask[];
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
@@ -171,15 +192,6 @@ function BoardCell({
         isDropTarget && "rounded-lg bg-accent/40",
       )}
     >
-      {showHeader ? (
-        <header className="flex h-10 shrink-0 items-center gap-2 px-3">
-          <TaskStateIcon state={state} />
-          <h2 className="truncate text-sm font-medium">{stateLabel(state)}</h2>
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-            {filterActive ? `${column.visible}/${column.total}` : column.total}
-          </span>
-        </header>
-      ) : null}
       <div className="flex min-h-0 flex-1 flex-col px-1 pb-1">
         <div className="flex flex-col gap-2">
           {tasks.map((task) => (
