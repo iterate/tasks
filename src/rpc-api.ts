@@ -108,7 +108,7 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
 
   async whoami(): Promise<TasksUser> {
     if (this.#credential.type !== "project-app-session") {
-      return { userId: null, email: null, name: null };
+      return { userId: null, email: null, name: null, image: null };
     }
     // The claims are trustworthy here: authenticate() already proved this
     // exact token by using it against the platform.
@@ -117,6 +117,7 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
       userId: typeof claims.userId === "string" ? claims.userId : null,
       email: typeof claims.email === "string" ? claims.email : null,
       name: typeof claims.name === "string" ? claims.name : null,
+      image: typeof claims.image === "string" ? claims.image : null,
     };
   }
 

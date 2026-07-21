@@ -1,7 +1,13 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover.tsx";
+import {
+  CheckIcon,
+  FolderTreeIcon,
+  LinkIcon,
+  ListFilterIcon,
+  MoreHorizontalIcon,
+  XIcon,
+} from "lucide-react";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -11,7 +17,16 @@ import {
   BreadcrumbSeparator,
 } from "../ui/breadcrumb.tsx";
 import { Button } from "../ui/button.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu.tsx";
 import { Input } from "../ui/input.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 
 /** The project slug, read off the `tasks--<slug>` app host. */
 export function projectSlug(): string {
@@ -20,7 +35,7 @@ export function projectSlug(): string {
   return match?.[1] ?? window.location.hostname;
 }
 
-/** project › repo › checkout — the top row's orientation line. */
+/** project › repo › checkout — the header's orientation line. */
 export function CheckoutBreadcrumbs({
   repoPath,
   checkoutId,
@@ -53,10 +68,48 @@ export function CheckoutBreadcrumbs({
   );
 }
 
+/** Icon-only controls get their labels back as hover tooltips. */
+export function WithTooltip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<span className="inline-flex" />}>{children}</TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const ICON_BUTTON = "h-8 w-8 px-0";
+
+/** Copy the current URL; flips to a check for a beat. */
+export function ShareButton() {
+  const [copied, setCopied] = useState(false);
+  return (
+    <WithTooltip label={copied ? "Copied!" : "Copy share link"}>
+      <Button
+        variant="outline"
+        size="sm"
+        className={ICON_BUTTON}
+        aria-label="Copy share link"
+        onClick={() => {
+          void navigator.clipboard.writeText(window.location.href).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          });
+        }}
+      >
+        {copied ? (
+          <CheckIcon aria-hidden className="size-3.5" />
+        ) : (
+          <LinkIcon aria-hidden className="size-3.5" />
+        )}
+      </Button>
+    </WithTooltip>
+  );
+}
+
 /**
- * The Linear-style filter affordance: a quiet dropdown button that opens a
- * small panel with the query input; the button reads "Filtered" while a
- * query is active.
+ * The Linear-style filter: an icon dropdown button opening a panel with the
+ * query input; while a query is active the button stays visually on.
  */
 export function FilterControl({
   value,
@@ -68,19 +121,20 @@ export function FilterControl({
   const [open, setOpen] = useState(false);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            variant={value !== "" ? "secondary" : "ghost"}
-            size="sm"
-            className="h-8 gap-1.5 text-xs"
-          />
-        }
-      >
-        <ListFilterIcon aria-hidden className="size-3.5" />
-        <span className="hidden sm:inline">{value !== "" ? "Filtered" : "Filter"}</span>
-        <ChevronDownIcon aria-hidden className="size-3" />
-      </PopoverTrigger>
+      <WithTooltip label={value === "" ? "Filter tasks" : `Filtered: ${value}`}>
+        <PopoverTrigger
+          render={
+            <Button
+              variant={value !== "" ? "secondary" : "outline"}
+              size="sm"
+              className={ICON_BUTTON}
+              aria-label="Filter tasks"
+            />
+          }
+        >
+          <ListFilterIcon aria-hidden className="size-3.5" />
+        </PopoverTrigger>
+      </WithTooltip>
       <PopoverContent align="end" className="w-72 p-2">
         <div className="relative">
           <Input
@@ -111,5 +165,92 @@ export function FilterControl({
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/** Grouping as an icon dropdown: folder rows on or off. */
+export function GroupControl({
+  value,
+  onChange,
+}: {
+  value: "folder" | null;
+  onChange: (value: "folder" | null) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <WithTooltip label={value === "folder" ? "Grouped by folder" : "No grouping"}>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant={value === "folder" ? "secondary" : "outline"}
+              size="sm"
+              className={ICON_BUTTON}
+              aria-label="Board grouping"
+            />
+          }
+        >
+          <FolderTreeIcon aria-hidden className="size-3.5" />
+        </DropdownMenuTrigger>
+      </WithTooltip>
+      <DropdownMenuContent align="end">
+        <DropdownMenuCheckboxItem
+          checked={value === "folder"}
+          onCheckedChange={(checked) => onChange(checked ? "folder" : null)}
+        >
+          Group by folder
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * Small screens: the icon cluster folds into one overflow menu (the shadcn
+ * way), keeping the header to breadcrumbs + presence + Commit.
+ */
+export function MobileOverflow({
+  filter,
+  onChangeFilter,
+  group,
+  onChangeGroup,
+}: {
+  filter: string;
+  onChangeFilter: (value: string) => void;
+  group: "folder" | null;
+  onChangeGroup: (value: "folder" | null) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="outline" size="sm" className={ICON_BUTTON} aria-label="More actions" />
+        }
+      >
+        <MoreHorizontalIcon aria-hidden className="size-3.5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem
+          onClick={() => {
+            void navigator.clipboard.writeText(window.location.href);
+          }}
+        >
+          Copy share link
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            const next = window.prompt("Filter tasks", filter);
+            if (next !== null) onChangeFilter(next);
+          }}
+        >
+          {filter === "" ? "Filter tasks…" : `Filtered: ${filter}`}
+        </DropdownMenuItem>
+        <DropdownMenuCheckboxItem
+          checked={group === "folder"}
+          onCheckedChange={(checked) => onChangeGroup(checked ? "folder" : null)}
+        >
+          Group by folder
+        </DropdownMenuCheckboxItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -52,6 +52,8 @@ export type TasksUser = {
   userId: string | null;
   email: string | null;
   name: string | null;
+  /** Avatar URL, once the auth worker mints an `image` claim. */
+  image: string | null;
 };
 
 export interface TasksProject {

@@ -75,15 +75,17 @@ export function CommitControls({
 
   return (
     <div className="flex items-center gap-2">
-      {dirty && !commitPending && autoSaveDueAt !== undefined ? (
-        <AutoSaveCountdown dueAt={autoSaveDueAt} />
-      ) : null}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
-          render={<Button variant={dirty ? "default" : "outline"} size="sm" disabled={!dirty} />}
+          render={
+            <Button variant={dirty ? "default" : "outline"} size="sm" className="h-8" disabled={!dirty} />
+          }
         >
           <GitCommitVerticalIcon aria-hidden className="size-3.5" />
           Commit{dirty ? ` (${taskChanges.length})` : ""}
+          {dirty && !commitPending && autoSaveDueAt !== undefined ? (
+            <AutoSaveCountdown dueAt={autoSaveDueAt} />
+          ) : null}
           <ChevronDownIcon aria-hidden className="size-3" />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-96 p-3">
@@ -154,7 +156,10 @@ export function CommitControls({
   );
 }
 
-/** Ticks in its own leaf so the board behind it never re-renders on ticks. */
+/**
+ * The auto-commit countdown, living INSIDE the Commit button as a quiet
+ * suffix. Ticks in its own leaf so the board never re-renders on ticks.
+ */
 function AutoSaveCountdown({ dueAt }: { dueAt: number }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -163,8 +168,8 @@ function AutoSaveCountdown({ dueAt }: { dueAt: number }) {
   }, []);
   const secondsLeft = Math.max(0, Math.ceil((dueAt - nowMs) / 1000));
   return (
-    <span className="text-xs tabular-nums whitespace-nowrap text-muted-foreground">
-      {secondsLeft <= 0 ? "Auto committing…" : `Auto commit in ${secondsLeft}s`}
+    <span className="text-[11px] tabular-nums whitespace-nowrap opacity-70">
+      {secondsLeft <= 0 ? "…" : `· ${secondsLeft}s`}
     </span>
   );
 }

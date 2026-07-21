@@ -183,6 +183,7 @@ export function applyVerifiedIdentity(provider: YProvider, user: TasksUser): Col
     name: user.name ?? user.email ?? current.name,
     userId: user.userId ?? undefined,
     email: user.email ?? undefined,
+    image: user.image ?? undefined,
   };
   provider.awareness.setLocalStateField("user", merged);
   registerCollaborator(provider.doc, {
@@ -202,6 +203,7 @@ export type CollabUser = {
   /** Platform-verified fields, present once whoami() resolved. */
   userId?: string;
   email?: string;
+  image?: string;
 };
 
 const IDENTITY_KEY = "tasks-collab-identity";

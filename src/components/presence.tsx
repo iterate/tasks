@@ -1,11 +1,9 @@
 import { useState } from "react";
-import { CheckIcon, LinkIcon } from "lucide-react";
 import type YProvider from "y-partyserver/provider";
 import { localCollabUser, renameCollabUser } from "../lib/use-checkout.ts";
 import type { TasksUser } from "../lib/tasks-api.ts";
 import type { Peer } from "../lib/board-model.ts";
-import { Avatar, AvatarFallback } from "../ui/avatar.tsx";
-import { Button } from "../ui/button.tsx";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 
 /**
@@ -33,6 +31,7 @@ export function PresenceAvatars({
       <PresenceAvatar
         name={selfName}
         color={self.color}
+        image={me?.image ?? null}
         email={me?.email ?? null}
         userId={me?.userId ?? null}
         openPath={null}
@@ -47,6 +46,7 @@ export function PresenceAvatars({
           key={peer.id}
           name={peer.user.name}
           color={peer.user.color}
+          image={peer.image ?? null}
           email={peer.email ?? null}
           userId={peer.userId ?? null}
           openPath={peer.openPath}
@@ -59,6 +59,7 @@ export function PresenceAvatars({
 function PresenceAvatar({
   name,
   color,
+  image,
   email,
   userId,
   openPath,
@@ -67,6 +68,7 @@ function PresenceAvatar({
 }: {
   name: string;
   color: string;
+  image: string | null;
   email: string | null;
   userId: string | null;
   openPath: string | null;
@@ -79,6 +81,7 @@ function PresenceAvatar({
         render={<button type="button" onClick={onClick} className="rounded-full" />}
       >
         <Avatar className="size-6 ring-2 ring-background">
+          {image === null ? null : <AvatarImage src={image} alt={name} />}
           <AvatarFallback
             className="text-[10px] font-semibold"
             style={{ backgroundColor: `${color}26`, color }}
@@ -107,27 +110,3 @@ function initials(name: string): string {
   return `${parts[0]?.[0] ?? "?"}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
-export function ShareLink() {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-8 text-xs text-muted-foreground"
-      title="Copy share link"
-      onClick={() => {
-        void navigator.clipboard.writeText(window.location.href).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-    >
-      {copied ? (
-        <CheckIcon aria-hidden className="size-3.5" />
-      ) : (
-        <LinkIcon aria-hidden className="size-3.5" />
-      )}
-      {copied ? "Copied" : "Share"}
-    </Button>
-  );
-}

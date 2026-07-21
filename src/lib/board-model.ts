@@ -17,6 +17,7 @@ export type Peer = {
   user: PresenceUser;
   email?: string;
   userId?: string;
+  image?: string;
   openPath: string | null;
 };
 

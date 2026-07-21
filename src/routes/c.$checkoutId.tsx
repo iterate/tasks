@@ -2,8 +2,6 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
-import { PlusIcon, Settings2Icon } from "lucide-react";
-import { Button } from "../ui/button.tsx";
 import {
   DEFAULT_REPO_PATH,
   applyTextEdit,
@@ -44,16 +42,14 @@ import { useRecentTouches, type RecentTouch } from "../lib/recency.ts";
 import { Board } from "../components/board.tsx";
 import { TaskSheet } from "../components/task-sheet.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
-import { PresenceAvatars, ShareLink } from "../components/presence.tsx";
-import { CheckoutBreadcrumbs, FilterControl } from "../components/checkout-header.tsx";
-import { Input } from "../ui/input.tsx";
+import { PresenceAvatars } from "../components/presence.tsx";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select.tsx";
+  CheckoutBreadcrumbs,
+  FilterControl,
+  GroupControl,
+  MobileOverflow,
+  ShareButton,
+} from "../components/checkout-header.tsx";
 import { SidebarTrigger } from "../ui/sidebar.tsx";
 import { Skeleton } from "../ui/skeleton.tsx";
 
@@ -140,7 +136,9 @@ function CheckoutPage() {
     const listed: Peer[] = [];
     for (const [id, state] of provider.awareness.getStates()) {
       if (id === doc.clientID) continue;
-      const user = (state as { user?: PresenceUser & { email?: string; userId?: string } }).user;
+      const user = (
+        state as { user?: PresenceUser & { email?: string; userId?: string; image?: string } }
+      ).user;
       if (!user || typeof user.name !== "string") continue;
       const openPath = (state as { openPath?: string | null }).openPath ?? null;
       listed.push({
@@ -148,6 +146,7 @@ function CheckoutPage() {
         user: { name: user.name, color: user.color },
         email: typeof user.email === "string" ? user.email : undefined,
         userId: typeof user.userId === "string" ? user.userId : undefined,
+        image: typeof user.image === "string" ? user.image : undefined,
         openPath,
       });
     }
@@ -429,44 +428,21 @@ function ReadyCheckout({
       <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
         <SidebarTrigger className="-ml-1" />
         <CheckoutBreadcrumbs repoPath={repoPath} checkoutId={checkoutId} />
-        <div className="ml-auto flex shrink-0 items-center gap-2">
-          <PresenceAvatars provider={provider} peers={peers} me={me} />
-          <ShareLink />
-        </div>
-      </header>
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5 text-xs"
-            onClick={() => addTask("todo", null)}
-          >
-            <PlusIcon aria-hidden className="size-3.5" />
-            New task
-          </Button>
-          <FilterControl value={filter} onChange={setFilter} />
-          <Select
-            items={[
-              { label: "Group: folder", value: "folder" },
-              { label: "No grouping", value: "none" },
-            ]}
-            value={rowField ?? "none"}
-            onValueChange={(value) => setRowField(value === "folder" ? "folder" : null)}
-          >
-            <SelectTrigger
-              aria-label="Board grouping"
-              size="sm"
-              className="h-8 w-fit gap-1.5 text-xs"
-            >
-              <Settings2Icon aria-hidden className="size-3.5 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="folder">Group: folder</SelectItem>
-              <SelectItem value="none">No grouping</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="hidden items-center gap-1.5 sm:flex">
+            <ShareButton />
+            <FilterControl value={filter} onChange={setFilter} />
+            <GroupControl value={rowField} onChange={setRowField} />
+          </div>
+          <div className="sm:hidden">
+            <MobileOverflow
+              filter={filter}
+              onChangeFilter={setFilter}
+              group={rowField}
+              onChangeGroup={setRowField}
+            />
+          </div>
+          <PresenceAvatars provider={provider} peers={peers} me={me} />
           <CommitControls
             taskChanges={taskChanges}
             commitMessage={commit.commitMessage}
@@ -480,7 +456,7 @@ function ReadyCheckout({
             onDiscardAll={discardAll}
           />
         </div>
-      </div>
+      </header>
       {disconnected ? (
         <p className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-800">
           disconnected — reconnecting… (edits keep working and sync when back)
