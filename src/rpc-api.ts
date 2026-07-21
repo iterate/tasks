@@ -11,6 +11,7 @@ import type {
   CollabOpened,
   CollabWaitResult,
   ProjectCredential,
+  WorkspaceStreamEvent,
   TasksApi,
   TasksCheckout,
   TasksProject,
@@ -319,6 +320,11 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
     this.#repoPath = repoPath;
   }
 
+  get #workspacePath(): string {
+    const repoSlug = this.#repoPath.replace(/^\/+/, "").replaceAll("/", "--");
+    return `/workspaces/tasks/${this.#checkoutId}~${repoSlug}`;
+  }
+
   async #withWorkspace<T>(operation: (ws: WorkspaceStub) => Promise<T>): Promise<T> {
     return this.#dial.withProject(async (project) => {
       const workspaces = (
@@ -327,8 +333,7 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       // The workspace identity ENCODES the repo: the same checkout id against
       // a different repository is a different workspace — it can never
       // silently bind to (and edit) the first repository's workspace.
-      const repoSlug = this.#repoPath.replace(/^\/+/, "").replaceAll("/", "--");
-      const ws = workspaces.get(`/workspaces/tasks/${this.#checkoutId}~${repoSlug}`);
+      const ws = workspaces.get(this.#workspacePath);
       try {
         return await operation(ws);
       } catch (error) {
@@ -381,6 +386,29 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
 
   versions(): Promise<Record<string, number>> {
     return this.#withWorkspace((ws) => ws.collab.versions());
+  }
+
+  /** The newest page of the workspace's stream events, newest first. */
+  async events(limit = 50): Promise<WorkspaceStreamEvent[]> {
+    // Touch the workspace first so its birth events exist on first view.
+    await this.#withWorkspace(async () => undefined);
+    const events = (await this.#dial.withProject(async (project) => {
+      const streams = (
+        project as unknown as {
+          streams: { get(path: string): { getEvents(args: object): Promise<unknown[]> } };
+        }
+      ).streams;
+      return streams.get(this.#workspacePath).getEvents({ includeEphemeral: true });
+    })) as { createdAt?: string; offset: number; payload?: unknown; type: string }[];
+    return events
+      .slice(-limit)
+      .reverse()
+      .map((event) => ({
+        createdAt: event.createdAt ?? "",
+        offset: event.offset,
+        payload: event.payload ?? null,
+        type: event.type,
+      }));
   }
 
   /** Every task file in the merged view, path → content (board seed).

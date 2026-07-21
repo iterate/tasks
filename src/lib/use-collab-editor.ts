@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { unifiedMergeView } from "@codemirror/merge";
@@ -26,14 +26,26 @@ export function useCollabEditor(input: {
   /** Redline layers on at build time (kept in sync with toggle()). */
   redline: boolean;
   onLiveContent?: (path: string, content: string) => void;
+  onStatus?: (status: string) => void;
 }) {
   const host = useRef<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState("connecting…");
+  const [status, setStatusState] = useState("connecting…");
   const [recovery, setRecovery] = useState<string | null>(null);
   const redlineRef = useRef(input.redline);
-  redlineRef.current = input.redline;
   const toggleRef = useRef<((on: boolean) => void) | null>(null);
-  const { checkoutId, repoPath, path, extensions, onLiveContent } = input;
+  const { checkoutId, repoPath, path, extensions, onLiveContent, onStatus } = input;
+  // Ref writes never happen during render — React may replay render work.
+  useEffect(() => {
+    redlineRef.current = input.redline;
+    toggleRef.current?.(input.redline);
+  }, [input.redline]);
+  const setStatus = useCallback(
+    (next: string) => {
+      setStatusState(next);
+      onStatus?.(next);
+    },
+    [onStatus],
+  );
 
   useEffect(() => {
     const connection = new CollabConnection(checkoutId, repoPath, `/${path}`);
@@ -49,11 +61,18 @@ export function useCollabEditor(input: {
       return [unifiedMergeView({ original: changes.baseContent }), redlineExtension(connection)];
     };
 
+    let reflectTimer: ReturnType<typeof setTimeout> | null = null;
     const liveReflector =
       onLiveContent === undefined
         ? []
         : EditorView.updateListener.of((update) => {
-            if (update.docChanged) onLiveContent(path, update.state.doc.toString());
+            if (!update.docChanged) return;
+            // Debounced: reflecting every keystroke reparses the whole board.
+            if (reflectTimer) clearTimeout(reflectTimer);
+            reflectTimer = setTimeout(
+              () => onLiveContent(path, update.state.doc.toString()),
+              200,
+            );
           });
 
     const buildState = (content: string, version: number, redlines: Extension) =>
@@ -102,10 +121,11 @@ export function useCollabEditor(input: {
       );
     return () => {
       cancelled = true;
+      if (reflectTimer) clearTimeout(reflectTimer);
       toggleRef.current = null;
       view?.destroy();
     };
-  }, [checkoutId, repoPath, path, extensions, onLiveContent]);
+  }, [checkoutId, repoPath, path, extensions, onLiveContent, setStatus]);
 
   return {
     dismissRecovery: () => setRecovery(null),

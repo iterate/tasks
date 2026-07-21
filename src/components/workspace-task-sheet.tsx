@@ -1,6 +1,4 @@
-import { useMemo, useState } from "react";
-import { EditorView, keymap, placeholder } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { lazy, Suspense, useState } from "react";
 import { XIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "../ui/sheet.tsx";
 import { Button } from "../ui/button.tsx";
@@ -8,8 +6,14 @@ import { Badge } from "../ui/badge.tsx";
 import { cn } from "../ui/utils.ts";
 import type { TaskChangeStatus } from "../state.ts";
 import { stateLabel, type BoardTask } from "../lib/board-model.ts";
-import { useCollabEditor } from "../lib/use-collab-editor.ts";
 import { TagPicker } from "./tag-picker.tsx";
+
+// The editor stack (CM6 + collab + merge) loads only when a sheet opens.
+const WorkspaceTaskEditor = lazy(() =>
+  import("./workspace-task-editor.tsx").then((module) => ({
+    default: module.WorkspaceTaskEditor,
+  })),
+);
 
 /**
  * The task detail sheet on the WORKSPACE lane: the shared collab-editor
@@ -99,27 +103,7 @@ function SheetBody({
   onClose: () => void;
 }) {
   const [redline, setRedline] = useState(false);
-  const extensions = useMemo(
-    () => [
-      history(),
-      keymap.of([...defaultKeymap, ...historyKeymap]),
-      EditorView.lineWrapping,
-      placeholder("Write the task as markdown…"),
-      EditorView.theme({
-        "&": { fontSize: "14px", height: "100%" },
-        ".cm-content": { fontFamily: "var(--font-mono, ui-monospace)", padding: "16px" },
-      }),
-    ],
-    [],
-  );
-  const editor = useCollabEditor({
-    checkoutId,
-    extensions,
-    onLiveContent,
-    path: task.path,
-    redline,
-    repoPath,
-  });
+  const [status, setStatus] = useState("connecting…");
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -151,11 +135,7 @@ function SheetBody({
         <Button
           variant={redline ? "default" : "outline"}
           size="sm"
-          onClick={() => {
-            const next = !redline;
-            setRedline(next);
-            editor.toggle(next);
-          }}
+          onClick={() => setRedline((current) => !current)}
         >
           Changes
         </Button>
@@ -174,20 +154,20 @@ function SheetBody({
             Revert
           </Button>
         )}
-        <span className="ml-auto font-mono">{editor.status}</span>
+        <span className="ml-auto font-mono">{status}</span>
       </div>
-      {editor.recovery !== null && (
-        <div className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-900">
-          <div className="flex items-center gap-2">
-            <span>Unaccepted text from before the re-sync (not in the document):</span>
-            <button type="button" className="ml-auto underline" onClick={editor.dismissRecovery}>
-              dismiss
-            </button>
-          </div>
-          <pre className="mt-1 rounded bg-white/60 p-2 whitespace-pre-wrap">{editor.recovery}</pre>
-        </div>
-      )}
-      <div ref={editor.host} className="min-h-0 flex-1 overflow-auto" />
+      <Suspense
+        fallback={<p className="p-4 text-sm text-muted-foreground">Loading editor…</p>}
+      >
+        <WorkspaceTaskEditor
+          checkoutId={checkoutId}
+          repoPath={repoPath}
+          path={task.path}
+          redline={redline}
+          onLiveContent={onLiveContent}
+          onStatus={setStatus}
+        />
+      </Suspense>
     </div>
   );
 }

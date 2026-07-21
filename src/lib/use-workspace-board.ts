@@ -84,13 +84,22 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   // (modified → modified was invisible to a kind-only diff). Status refreshes
   // badges on the same tick; poll errors surface instead of vanishing.
   const versionsRef = useRef<Record<string, number>>({});
+  const tickRef = useRef(0);
   useEffect(() => {
     const mine = generation.current;
     const timer = setInterval(() => {
-      void Promise.all([lane((ws) => ws.versions()), lane((ws) => ws.status())])
+      // versions() is a cheap map read; status() runs the settle barrier and
+      // git classification — polling THAT every tick makes the whole page
+      // pay a platform barrier per few seconds. Badges refresh on a slower
+      // cadence and after mutations/commits.
+      const wantStatus = tickRef.current++ % 4 === 0;
+      void Promise.all([
+        lane((ws) => ws.versions()),
+        wantStatus ? lane((ws) => ws.status()) : Promise.resolve(null),
+      ])
         .then(async ([rawVersions, status]) => {
           if (generation.current !== mine) return;
-          const next = changeMap(status);
+          const next = status === null ? changes : changeMap(status);
           const versions = Object.fromEntries(
             Object.entries(rawVersions).map(([path, version]) => [boardKey(path), version]),
           );
@@ -98,8 +107,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
           for (const [path, version] of Object.entries(versions)) {
             if (versionsRef.current[path] !== version) moved.add(path);
           }
-          for (const [path, kind] of next) if (changes.get(path) !== kind) moved.add(path);
-          for (const path of changes.keys()) if (!next.has(path)) moved.add(path);
+          if (status !== null) {
+            for (const [path, kind] of next) if (changes.get(path) !== kind) moved.add(path);
+            for (const path of changes.keys()) if (!next.has(path)) moved.add(path);
+          }
           versionsRef.current = versions;
           if (moved.size === 0) return;
           const fetched = await Promise.all(
@@ -108,7 +119,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
             ),
           );
           if (generation.current !== mine) return;
-          setChanges(next);
+          if (status !== null) setChanges(next);
           setFiles((current) => {
             if (current === null) return current;
             const merged = { ...current };
@@ -126,12 +137,28 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     return () => clearInterval(timer);
   }, [lane, changes]);
 
+  // Per-file parse cache: a poll refetch or one live keystroke must cost
+  // O(changed files), never a reparse of the whole board.
+  const parseCache = useRef(new Map<string, { source: string; task: BoardTask }>());
   const tasks = useMemo<BoardTask[]>(() => {
     if (files === null) return [];
-    return Object.entries(files)
-      .filter(([path]) => isTaskFilePath(path))
-      .map(([path, source]) => toBoardTask(path, source))
-      .sort((left, right) => left.path.localeCompare(right.path));
+    const cache = parseCache.current;
+    const next: BoardTask[] = [];
+    for (const [path, source] of Object.entries(files)) {
+      if (!isTaskFilePath(path)) continue;
+      const cached = cache.get(path);
+      if (cached !== undefined && cached.source === source) {
+        next.push(cached.task);
+        continue;
+      }
+      const task = toBoardTask(path, source);
+      cache.set(path, { source, task });
+      next.push(task);
+    }
+    if (cache.size > next.length * 2) {
+      for (const key of cache.keys()) if (files[key] === undefined) cache.delete(key);
+    }
+    return next.sort((left, right) => left.path.localeCompare(right.path));
   }, [files]);
 
   /** Optimistic local write + the same platform write an agent would make. */
@@ -225,6 +252,8 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     [lane],
   );
 
+  const loadEvents = useCallback(() => lane((ws) => ws.events(100)), [lane]);
+
   return {
     changes,
     commit,
@@ -232,6 +261,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     discardAll,
     error,
     files,
+    loadEvents,
     ready: files !== null,
     reflectLiveContent,
     revertTask,

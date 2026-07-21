@@ -104,6 +104,14 @@ export type CollabChanges = {
   inserted: { clientId: string; from: number; to: number }[];
 };
 
+/** One event from the workspace's platform stream (the event-sourced spine). */
+export type WorkspaceStreamEvent = {
+  createdAt: string;
+  offset: number;
+  payload: unknown;
+  type: string;
+};
+
 export interface TasksWorkspace {
   open(filePath: string): Promise<CollabOpened>;
   /** The mount content at HEAD — what uncommitted work diffs against. */
@@ -126,6 +134,8 @@ export interface TasksWorkspace {
   ): Promise<CollabWaitResult>;
   /** Head versions of every live session — the board's change cursor. */
   versions(): Promise<Record<string, number>>;
+  /** The newest page of the workspace's stream events (the audit spine). */
+  events(limit?: number): Promise<WorkspaceStreamEvent[]>;
   /** Every task file in the merged view (board seed). */
   files(): Promise<Record<string, string>>;
   /** Filesystem trio with the platform gateway's semantics: live sessions

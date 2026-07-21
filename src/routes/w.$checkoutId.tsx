@@ -9,7 +9,11 @@ import {
   MobileOverflow,
   ShareButton,
 } from "../components/checkout-header.tsx";
+import { ActivityIcon } from "lucide-react";
+import { Button } from "../ui/button.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
+import { StreamEventsSheet } from "../components/stream-events-sheet.tsx";
+import { WithTooltip } from "../components/checkout-header.tsx";
 import { WorkspaceTaskSheet } from "../components/workspace-task-sheet.tsx";
 import { useWorkspaceBoard } from "../lib/use-workspace-board.ts";
 import { useTaskCommit } from "../lib/use-task-commit.ts";
@@ -54,6 +58,7 @@ function WorkspaceBoardPage() {
   const repoPath = normalizeRepoPath(search.repo) ?? DEFAULT_REPO_PATH;
   const board = useWorkspaceBoard(checkoutId, repoPath);
   const [autoCommit, setAutoCommit] = useState(true);
+  const [eventsOpen, setEventsOpen] = useState(false);
   const [commitPending, setCommitPending] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
 
@@ -149,6 +154,11 @@ function WorkspaceBoardPage() {
         <CheckoutBreadcrumbs repoPath={repoPath} checkoutId={checkoutId} />
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <div className="hidden items-center gap-1.5 sm:flex">
+            <WithTooltip label="Stream events">
+              <Button variant="ghost" size="icon" onClick={() => setEventsOpen(true)}>
+                <ActivityIcon className="size-4" />
+              </Button>
+            </WithTooltip>
             <ShareButton />
             <FilterControl value={search.q} onChange={(q) => patchSearch({ q })} />
             <GroupControl
@@ -210,6 +220,11 @@ function WorkspaceBoardPage() {
           onOpen={(path) => patchSearch({ task: path })}
         />
       )}
+      <StreamEventsSheet
+        open={eventsOpen}
+        loadEvents={board.loadEvents}
+        onClose={() => setEventsOpen(false)}
+      />
       <WorkspaceTaskSheet
         task={openTask}
         checkoutId={checkoutId}
