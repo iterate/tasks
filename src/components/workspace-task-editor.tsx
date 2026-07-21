@@ -16,12 +16,14 @@ export function WorkspaceTaskEditor({
   focusHeadline,
   onLiveContent,
   onStatus,
+  apiRef,
 }: {
   checkoutId: string;
   repoPath: string;
   path: string;
   redline: boolean;
   focusHeadline?: "select" | "end";
+  apiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onStatus?: (status: string) => void;
 }) {
@@ -39,6 +41,7 @@ export function WorkspaceTaskEditor({
     [],
   );
   const editor = useCollabEditor({
+    apiRef,
     checkoutId,
     extensions,
     focusHeadline,

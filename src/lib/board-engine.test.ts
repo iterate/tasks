@@ -97,9 +97,11 @@ describe("optimistic change transitions", () => {
   it("first write of a known (seeded) path is a modification", () => {
     expect(changeAfterWrite(undefined, true)).toBe("modified");
   });
-  it("a later write keeps the existing status", () => {
+  it("a later write keeps the existing status — except deleted, which revives as modified", () => {
     expect(changeAfterWrite("added", true)).toBe("added");
-    expect(changeAfterWrite("deleted", true)).toBe("deleted");
+    expect(changeAfterWrite("modified", true)).toBe("modified");
+    expect(changeAfterWrite("deleted", true)).toBe("modified");
+    expect(changeAfterWrite("deleted", false)).toBe("modified");
   });
   it("deleting an uncommitted add clears the change; others become deleted", () => {
     expect(changeAfterDelete("added")).toBeNull();

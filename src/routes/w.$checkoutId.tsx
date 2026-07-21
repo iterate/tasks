@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CollabEditorApi } from "../lib/collab-editor-api.ts";
 import { SidebarTrigger } from "../ui/sidebar.tsx";
 import { Board } from "../components/board.tsx";
 import {
@@ -69,6 +70,29 @@ function WorkspaceBoardPage() {
   // board).
   const [draftPath, setDraftPath] = useState<string | null>(null);
   const renamedDraftRef = useRef(false);
+  // The open sheet's live-doc API: mutations of the OPEN file go through the
+  // live document (the board mirror is 200ms behind it — writing board state
+  // over a live path would drop the newest keystrokes).
+  const editorApiRef = useRef<CollabEditorApi | null>(null);
+
+  /** Live text of the open file, else the board's copy. */
+  const sourceOf = useCallback((task: BoardTask): string => {
+    const api = editorApiRef.current;
+    return api !== null && api.path === task.path ? api.source() : task.source;
+  }, []);
+
+  /** Transform the OPEN file in the live editor; false when not open. */
+  const applyLive = useCallback(
+    (path: string, transform: (source: string) => string): boolean => {
+      const api = editorApiRef.current;
+      if (api === null || api.path !== path) return false;
+      api.applyTransform(transform);
+      // Reflect immediately so cards/commit summaries don't lag the doc.
+      board.reflectLiveContent(path, api.source());
+      return true;
+    },
+    [board],
+  );
   const [commitPending, setCommitPending] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
 
@@ -129,19 +153,22 @@ function WorkspaceBoardPage() {
 
   const moveTask = useCallback(
     (task: BoardTask, state: string, folder: string, labels?: string[]) => {
-      let source =
-        taskColumnState(task.state) === state ? task.source : setTaskCardState(task.source, state);
-      if (labels !== undefined) source = setTaskCardLabels(source, labels);
+      const transform = (current: string) => {
+        let next =
+          taskColumnState(task.state) === state ? current : setTaskCardState(current, state);
+        if (labels !== undefined) next = setTaskCardLabels(next, labels);
+        return next;
+      };
       if (folder === task.folder) {
-        board.writeTask(task.path, source);
+        if (!applyLive(task.path, transform)) board.writeTask(task.path, transform(sourceOf(task)));
         return;
       }
       const nextPath = taskPathInFolder(task.path, folder);
-      board.writeTask(nextPath, source);
+      board.writeTask(nextPath, transform(sourceOf(task)));
       board.deleteTask(task.path);
       if (search.task === task.path) patchSearch({ task: nextPath });
     },
-    [board, patchSearch, search.task],
+    [applyLive, board, patchSearch, search.task, sourceOf],
   );
 
   const addTask = useCallback(
@@ -167,8 +194,10 @@ function WorkspaceBoardPage() {
     const target = taskPathInFolder(taskPathForTitle(task.title), task.folder);
     if (target === draftPath || board.files?.[target] !== undefined) return;
     const timer = setTimeout(() => {
-      const source = board.files?.[draftPath];
-      if (source === undefined || board.files?.[target] !== undefined) return;
+      // The LIVE doc, not the board mirror — the mirror is debounced and a
+      // rename must never persist a version missing the newest keystrokes.
+      const source = sourceOf(task);
+      if (board.files?.[target] !== undefined) return;
       board.writeTask(target, source);
       board.deleteTask(draftPath);
       renamedDraftRef.current = true;
@@ -176,7 +205,7 @@ function WorkspaceBoardPage() {
       patchSearch({ task: target });
     }, 700);
     return () => clearTimeout(timer);
-  }, [draftPath, search.task, board, patchSearch]);
+  }, [draftPath, search.task, board, patchSearch, sourceOf]);
 
   // The sheet's path field: any rename the board can represent is allowed —
   // the file must stay a task (.md under a folder named "tasks").
@@ -188,13 +217,13 @@ function WorkspaceBoardPage() {
         return 'Path must be a .md file inside a folder named "tasks".';
       if (nextPath === task.path) return null;
       if (board.files?.[nextPath] !== undefined) return "A file already exists at that path.";
-      board.writeTask(nextPath, task.source);
+      board.writeTask(nextPath, sourceOf(task));
       board.deleteTask(task.path);
       setDraftPath((current) => (current === task.path ? nextPath : current));
       if (search.task === task.path) patchSearch({ task: nextPath });
       return null;
     },
-    [board, patchSearch, search.task],
+    [board, patchSearch, search.task, sourceOf],
   );
 
   return (
@@ -291,14 +320,17 @@ function WorkspaceBoardPage() {
         changeStatus={openTask === null ? undefined : board.changes.get(openTask.path)}
         onLiveContent={board.reflectLiveContent}
         onChangeState={(state) => {
-          if (openTask !== null)
-            board.writeTask(openTask.path, setTaskCardState(openTask.source, state));
+          if (openTask === null) return;
+          if (!applyLive(openTask.path, (current) => setTaskCardState(current, state)))
+            board.writeTask(openTask.path, setTaskCardState(sourceOf(openTask), state));
         }}
         onChangeLabels={(labels) => {
-          if (openTask !== null)
-            board.writeTask(openTask.path, setTaskCardLabels(openTask.source, labels));
+          if (openTask === null) return;
+          if (!applyLive(openTask.path, (current) => setTaskCardLabels(current, labels)))
+            board.writeTask(openTask.path, setTaskCardLabels(sourceOf(openTask), labels));
         }}
         onRename={(nextPath) => (openTask === null ? null : renameTask(openTask, nextPath))}
+        editorApiRef={editorApiRef}
         focusHeadline={
           openTask !== null && openTask.path === draftPath
             ? renamedDraftRef.current

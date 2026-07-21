@@ -47,6 +47,7 @@ export function WorkspaceTaskSheet({
   changeStatus,
   onRename,
   focusHeadline,
+  editorApiRef,
   onLiveContent,
   onChangeState,
   onChangeLabels,
@@ -63,6 +64,7 @@ export function WorkspaceTaskSheet({
   /** Rename the task file; returns an error message or null on success. */
   onRename: (nextPath: string) => string | null;
   focusHeadline?: "select" | "end";
+  editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
   onChangeLabels: (labels: string[]) => void;
@@ -87,6 +89,7 @@ export function WorkspaceTaskSheet({
             changeStatus={changeStatus}
             onRename={onRename}
             focusHeadline={focusHeadline}
+            editorApiRef={editorApiRef}
             onLiveContent={onLiveContent}
             onChangeState={onChangeState}
             onChangeLabels={onChangeLabels}
@@ -108,6 +111,7 @@ function SheetBody({
   changeStatus,
   onRename,
   focusHeadline,
+  editorApiRef,
   onLiveContent,
   onChangeState,
   onChangeLabels,
@@ -123,6 +127,7 @@ function SheetBody({
   /** Rename the task file; returns an error message or null on success. */
   onRename: (nextPath: string) => string | null;
   focusHeadline?: "select" | "end";
+  editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
   onChangeLabels: (labels: string[]) => void;
@@ -260,6 +265,7 @@ function SheetBody({
           path={task.path}
           redline={true}
           focusHeadline={focusHeadline}
+          apiRef={editorApiRef}
           onLiveContent={onLiveContent}
           onStatus={setStatus}
         />

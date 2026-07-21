@@ -189,6 +189,10 @@ export function redlineExtension(connection: CollabConnection) {
       timer: ReturnType<typeof setTimeout> | null = null;
       done = false;
       generation = 0;
+      /** Version-mismatch retries since the last edit: when the peer is stuck
+       * (too-large, prolonged recovery) the layer must not poll changes()
+       * forever — it goes quiet until the next docChanged. */
+      futile = 0;
 
       constructor(readonly view: EditorView) {
         void this.refresh();
@@ -198,6 +202,7 @@ export function redlineExtension(connection: CollabConnection) {
         if (!update.docChanged) return;
         // Keep marks visually anchored while the authoritative fold catches up.
         this.decorations = this.decorations.map(update.changes);
+        this.futile = 0;
         if (this.timer) clearTimeout(this.timer);
         this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
       }
@@ -216,9 +221,12 @@ export function redlineExtension(connection: CollabConnection) {
             changes.headVersion !== getSyncedVersion(this.view.state) ||
             sendableUpdates(this.view.state).length > 0
           ) {
-            this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
+            if (this.futile++ < 20) {
+              this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
+            }
             return;
           }
+          this.futile = 0;
           const segments: CollabChangeSegment[] = [
             ...changes.inserted.map((span) => ({ ...span, kind: "inserted" as const })),
             ...changes.deleted.map((span) => ({ ...span, kind: "deleted" as const })),

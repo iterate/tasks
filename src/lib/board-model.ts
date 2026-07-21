@@ -116,6 +116,9 @@ export function changeAfterWrite(
   current: TaskChangeStatus | undefined,
   known: boolean,
 ): TaskChangeStatus {
+  // Recreating a deleted file: it existed at base, so the live copy is a
+  // modification again — never a lingering deleted badge.
+  if (current === "deleted") return "modified";
   if (current !== undefined) return current;
   return known ? "modified" : "added";
 }

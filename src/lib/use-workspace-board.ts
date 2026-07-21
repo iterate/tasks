@@ -85,6 +85,9 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   // badges on the same tick; poll errors surface instead of vanishing.
   const versionsRef = useRef<Record<string, number>>({});
   const tickRef = useRef(0);
+  // Bumped by every optimistic mutation: an in-flight status() response from
+  // BEFORE the mutation must not overwrite the newer local badges.
+  const mutationEpoch = useRef(0);
   useEffect(() => {
     const mine = generation.current;
     const timer = setInterval(() => {
@@ -93,6 +96,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       // pay a platform barrier per few seconds. Badges refresh on a slower
       // cadence and after mutations/commits.
       const wantStatus = tickRef.current++ % 4 === 0;
+      const epochBefore = mutationEpoch.current;
       void Promise.all([
         lane((ws) => ws.versions()),
         wantStatus ? lane((ws) => ws.status()) : Promise.resolve(null),
@@ -119,7 +123,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
             ),
           );
           if (generation.current !== mine) return;
-          if (status !== null) setChanges(next);
+          if (status !== null && mutationEpoch.current === epochBefore) setChanges(next);
           setFiles((current) => {
             if (current === null) return current;
             const merged = { ...current };
@@ -164,6 +168,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   /** Optimistic local write + the same platform write an agent would make. */
   const writeTask = useCallback(
     (path: string, content: string) => {
+      mutationEpoch.current++;
       setFiles((current) => {
         // The transition needs to know if the path existed BEFORE this write
         // (unknown path = an ADD, not a modification), so status updates
@@ -185,6 +190,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
 
   const deleteTask = useCallback(
     (path: string) => {
+      mutationEpoch.current++;
       setFiles((current) => {
         if (current === null) return current;
         const { [path]: _gone, ...rest } = current;

@@ -17,6 +17,7 @@ async function ensureCollabIdentity(): Promise<void> {
   }
 }
 import { redlineExtension } from "./collab-redline.ts";
+import type { CollabEditorApi } from "./collab-editor-api.ts";
 
 /**
  * The ONE collaborative-editor state machine, shared by every surface that
@@ -43,13 +44,16 @@ export function useCollabEditor(input: {
   focusHeadline?: "select" | "end";
   onLiveContent?: (path: string, content: string) => void;
   onStatus?: (status: string) => void;
+  /** Filled with the live-doc API while the editor is mounted (see
+   * CollabEditorApi — the board mutates open files through this). */
+  apiRef?: { current: CollabEditorApi | null };
 }) {
   const host = useRef<HTMLDivElement | null>(null);
   const [status, setStatusState] = useState("connecting…");
   const [recovery, setRecovery] = useState<string | null>(null);
   const redlineRef = useRef(input.redline);
   const toggleRef = useRef<((on: boolean) => void) | null>(null);
-  const { checkoutId, repoPath, path, extensions, onLiveContent, onStatus, focusHeadline } = input;
+  const { checkoutId, repoPath, path, extensions, onLiveContent, onStatus, focusHeadline, apiRef } = input;
   // Ref writes never happen during render — React may replay render work.
   useEffect(() => {
     redlineRef.current = input.redline;
@@ -127,6 +131,36 @@ export function useCollabEditor(input: {
           parent: host.current,
           state: buildState(opened.content, opened.version, layers),
         });
+        if (apiRef !== undefined) {
+          const live = view;
+          apiRef.current = {
+            applyTransform: (transform) => {
+              const current = live.state.doc.toString();
+              const next = transform(current);
+              if (next === current) return;
+              // Minimal splice: only the changed region moves, so concurrent
+              // edits elsewhere survive and attribution stays honest.
+              let start = 0;
+              const maxStart = Math.min(current.length, next.length);
+              while (start < maxStart && current[start] === next[start]) start++;
+              let endCurrent = current.length;
+              let endNext = next.length;
+              while (
+                endCurrent > start &&
+                endNext > start &&
+                current[endCurrent - 1] === next[endNext - 1]
+              ) {
+                endCurrent--;
+                endNext--;
+              }
+              live.dispatch({
+                changes: { from: start, insert: next.slice(start, endNext), to: endCurrent },
+              });
+            },
+            path,
+            source: () => live.state.doc.toString(),
+          };
+        }
         if (focusHeadline !== undefined) {
           const heading = /^#\s+(.*)$/m.exec(opened.content);
           if (heading !== null) {
@@ -149,9 +183,10 @@ export function useCollabEditor(input: {
       cancelled = true;
       if (reflectTimer) clearTimeout(reflectTimer);
       toggleRef.current = null;
+      if (apiRef !== undefined) apiRef.current = null;
       view?.destroy();
     };
-  }, [checkoutId, repoPath, path, extensions, onLiveContent, setStatus, focusHeadline]);
+  }, [checkoutId, repoPath, path, extensions, onLiveContent, setStatus, focusHeadline, apiRef]);
 
   return {
     dismissRecovery: () => setRecovery(null),
