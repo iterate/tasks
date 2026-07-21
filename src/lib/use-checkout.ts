@@ -4,6 +4,7 @@ import YProvider from "y-partyserver/provider";
 import { newWebSocketRpcSession } from "capnweb";
 import type { CommitResult } from "../state.ts";
 import type { CheckoutIndexEntry, TasksApi, TasksUser } from "./tasks-api.ts";
+import { registerCollaborator } from "./checkout-shared.ts";
 
 export type CheckoutStatus = "connecting" | "connected" | "ready" | "disconnected";
 
@@ -25,7 +26,11 @@ export function useCheckout(checkoutId: string, repoPath: string) {
       prefix: `/yjs/${encodeURIComponent(checkoutId)}`,
       params: { repoPath },
     });
-    provider.awareness.setLocalStateField("user", localCollabUser());
+    const user = localCollabUser();
+    provider.awareness.setLocalStateField("user", user);
+    // Also into the doc's collaborators map, so attribution outlives the
+    // session (awareness forgets disconnected clients; the doc does not).
+    registerCollaborator(doc, { name: user.name, color: user.color });
     setHandle({ provider, doc });
     return () => {
       setHandle(null);
@@ -180,6 +185,12 @@ export function applyVerifiedIdentity(provider: YProvider, user: TasksUser): Col
     email: user.email ?? undefined,
   };
   provider.awareness.setLocalStateField("user", merged);
+  registerCollaborator(provider.doc, {
+    name: merged.name,
+    color: merged.color,
+    ...(merged.userId === undefined ? {} : { userId: merged.userId }),
+    ...(merged.email === undefined ? {} : { email: merged.email }),
+  });
   return merged;
 }
 
@@ -195,14 +206,15 @@ export type CollabUser = {
 
 const IDENTITY_KEY = "tasks-collab-identity";
 // Mid-tone palette: readable as text on the light theme, still saturated
-// enough for cursors and presence dots.
+// enough for cursors and presence dots. Violet is reserved for agents
+// (AGENT_COLLABORATOR), so it stays out of the human draw.
 const COLORS = [
   "#059669",
   "#d97706",
   "#4f46e5",
   "#dc2626",
   "#0891b2",
-  "#9333ea",
+  "#0d9488",
   "#65a30d",
   "#db2777",
 ];

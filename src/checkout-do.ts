@@ -12,6 +12,7 @@ import {
   taskCommitMessagePrompt,
 } from "./tasks-model.ts";
 import {
+  AGENT_COLLABORATOR,
   applyTextEdit,
   checkoutBaseCommit,
   checkoutBaseContents,
@@ -21,6 +22,7 @@ import {
   checkoutRepoChanges,
   checkoutTaskChanges,
   normalizeRepoPath,
+  registerCollaborator,
 } from "./lib/checkout-shared.ts";
 import type { CheckoutSnapshot, ProjectCredential } from "./lib/tasks-api.ts";
 const PROJECT_ID_HEADER = "x-itx-project-id";
@@ -157,6 +159,9 @@ export class TasksCheckoutDurableObject extends YServer {
       throw new Error(`${path} is not a task file — checkouts only edit tasks/ markdown`);
     }
     this.document.transact(() => {
+      // API-lane writes all share this doc's client — give it a face so
+      // collaborators' recency glows can say "agent".
+      registerCollaborator(this.document, AGENT_COLLABORATOR);
       const files = checkoutFilesMap(this.document);
       if (content === null) {
         files.delete(path);

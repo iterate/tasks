@@ -22,6 +22,41 @@ export function checkoutFilesMap(doc: Y.Doc): Y.Map<Y.Text> {
   return doc.getMap<Y.Text>("files");
 }
 
+/**
+ * Durable attribution: every Yjs item already carries its author's
+ * clientID; this map gives those ids a face. Clients register themselves on
+ * join (verified identity when available), the checkout DO registers as
+ * "agent" — so recency glows and hover attribution keep working even after
+ * the author disconnects.
+ */
+export type CollaboratorInfo = {
+  name: string;
+  color: string;
+  userId?: string;
+  email?: string;
+  agent?: boolean;
+};
+
+/** All API-lane writes share the DO's doc client, so agents wear one identity. */
+export const AGENT_COLLABORATOR: CollaboratorInfo = { agent: true, color: "#8b5cf6", name: "agent" };
+
+export function checkoutCollaboratorsMap(doc: Y.Doc): Y.Map<CollaboratorInfo> {
+  return doc.getMap<CollaboratorInfo>("collaborators");
+}
+
+export function registerCollaborator(doc: Y.Doc, info: CollaboratorInfo): void {
+  const map = checkoutCollaboratorsMap(doc);
+  const key = String(doc.clientID);
+  const current = map.get(key);
+  if (current === undefined || JSON.stringify(current) !== JSON.stringify(info)) {
+    map.set(key, info);
+  }
+}
+
+export function collaboratorFor(doc: Y.Doc, clientId: number): CollaboratorInfo | null {
+  return checkoutCollaboratorsMap(doc).get(String(clientId)) ?? null;
+}
+
 export function checkoutMetaMap(doc: Y.Doc): Y.Map<unknown> {
   return doc.getMap("meta");
 }
