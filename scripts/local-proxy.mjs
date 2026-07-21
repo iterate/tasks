@@ -1,27 +1,33 @@
 // Local stand-in for the config-worker proxy: forwards http://localhost:<port>
-// to the tasks vite dev server, stamping the trusted project header + auth
-// cookie the vessel expects (prod: the project's config worker does this).
-// Handles WebSocket upgrades (both /yjs and /api lanes need them).
-// Usage: node scripts/local-proxy.mjs <listenPort> <targetPort> <projectId> <token>
+// to a tasks vessel (local port OR a deployed https origin), stamping the
+// trusted project header + auth cookie the vessel expects. Handles WebSocket
+// upgrades (both /yjs and /api lanes need them).
+// Usage: node scripts/local-proxy.mjs <listenPort> <targetOrigin> <projectId> <token>
+//   targetOrigin: 5199 | http://localhost:5199 | https://tasks-collab-preview.iterate.workers.dev
 import http from "node:http";
+import https from "node:https";
 import net from "node:net";
+import tls from "node:tls";
 
-const [listenPort, targetPort, projectId, token] = process.argv.slice(2);
-if (!listenPort || !targetPort || !projectId || !token) {
-  console.error("usage: local-proxy.mjs <listenPort> <targetPort> <projectId> <token>");
+const [listenPort, targetArg, projectId, token] = process.argv.slice(2);
+if (!listenPort || !targetArg || !projectId || !token) {
+  console.error("usage: local-proxy.mjs <listenPort> <targetOrigin> <projectId> <token>");
   process.exit(1);
 }
+const target = new URL(/^\d+$/.test(targetArg) ? `http://localhost:${targetArg}` : targetArg);
+const secure = target.protocol === "https:";
+const targetPort = Number(target.port || (secure ? 443 : 80));
 
 const stamp = (headers) => {
-  const out = { ...headers, "x-itx-project-id": projectId };
+  const out = { ...headers, host: target.host, "x-itx-project-id": projectId };
   const cookies = [headers.cookie, `iterate-project-auth=${token}`].filter(Boolean);
   out.cookie = cookies.join("; ");
   return out;
 };
 
 const server = http.createServer((req, res) => {
-  const proxied = http.request(
-    { host: "localhost", port: Number(targetPort), path: req.url, method: req.method, headers: stamp(req.headers) },
+  const proxied = (secure ? https : http).request(
+    { headers: stamp(req.headers), host: target.hostname, method: req.method, path: req.url, port: targetPort },
     (upstream) => {
       res.writeHead(upstream.statusCode ?? 502, upstream.headers);
       upstream.pipe(res);
@@ -32,7 +38,10 @@ const server = http.createServer((req, res) => {
 });
 
 server.on("upgrade", (req, socket, head) => {
-  const upstream = net.connect(Number(targetPort), "localhost", () => {
+  const upstream = secure
+    ? tls.connect(targetPort, target.hostname, { servername: target.hostname })
+    : net.connect(targetPort, target.hostname);
+  upstream.on(secure ? "secureConnect" : "connect", () => {
     const headers = stamp(req.headers);
     const lines = [`${req.method} ${req.url} HTTP/1.1`];
     for (const [key, value] of Object.entries(headers)) {
@@ -43,11 +52,14 @@ server.on("upgrade", (req, socket, head) => {
     socket.pipe(upstream);
     upstream.pipe(socket);
   });
-  const drop = () => { socket.destroy(); upstream.destroy(); };
+  const drop = () => {
+    socket.destroy();
+    upstream.destroy();
+  };
   upstream.on("error", drop);
   socket.on("error", drop);
 });
 
 server.listen(Number(listenPort), "127.0.0.1", () => {
-  console.log(`board: http://localhost:${listenPort}  →  vessel :${targetPort}  (project ${projectId})`);
+  console.log(`board: http://localhost:${listenPort}  →  ${target.origin}  (project ${projectId})`);
 });
