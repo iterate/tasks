@@ -205,7 +205,13 @@ function WorkspaceBoardPage() {
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <div className="hidden items-center gap-1.5 sm:flex">
             <WithTooltip label="Stream events">
-              <Button variant="ghost" size="icon" onClick={() => setEventsOpen(true)}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 px-0"
+                aria-label="Stream events"
+                onClick={() => setEventsOpen(true)}
+              >
                 <ActivityIcon className="size-4" />
               </Button>
             </WithTooltip>
@@ -272,7 +278,8 @@ function WorkspaceBoardPage() {
       )}
       <StreamEventsSheet
         open={eventsOpen}
-        loadEvents={board.loadEvents}
+        streamPath={`/workspaces/tasks/${checkoutId}~${repoPath.replace(/^\/+/, "").replaceAll("/", "--")}`}
+        subscribe={board.subscribeEvents}
         onClose={() => setEventsOpen(false)}
       />
       <WorkspaceTaskSheet

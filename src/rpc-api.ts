@@ -411,6 +411,31 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       }));
   }
 
+  /**
+   * Live event feed: durable history after `afterOffset`, then every new
+   * commit, PUSHED over the retained callback — the platform's ephemeral
+   * subscription lane composed end-to-end (browser stub → vessel → stream
+   * DO). Returns the platform's subscription handle (unsubscribe()-able).
+   */
+  async subscribeEvents(
+    processEventBatch: (batch: { events: WorkspaceStreamEvent[] }) => unknown,
+    afterOffset = 0,
+  ): Promise<{ unsubscribe(): void }> {
+    // Touch the workspace first so its birth events exist on first view.
+    await this.#withWorkspace(async () => undefined);
+    return this.#dial.withProject(async (project) => {
+      const streams = (
+        project as unknown as {
+          streams: { get(path: string): { subscribe(args: object): Promise<unknown> } };
+        }
+      ).streams;
+      return (await streams.get(this.#workspacePath).subscribe({
+        processEventBatch,
+        replayAfterOffset: afterOffset,
+      })) as { unsubscribe(): void };
+    });
+  }
+
   /** Every task file in the merged view, path → content (board seed).
    * PoC shape: fine for boards of hundreds; the real fix for gigantic repos
    * is a platform-side filtered snapshot (the workspace equivalent of the

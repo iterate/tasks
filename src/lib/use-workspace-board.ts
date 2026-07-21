@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { withProject } from "./use-checkout.ts";
-import type { TasksWorkspace } from "./tasks-api.ts";
+import type { TasksWorkspace, WorkspaceStreamEvent } from "./tasks-api.ts";
 import type { TaskChangeStatus, TaskChangeSummary } from "../state.ts";
 import { isTaskFilePath, parseTaskCard } from "../tasks-model.ts";
 import { toBoardTask, type BoardTask } from "./board-model.ts";
@@ -254,7 +254,11 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     [lane],
   );
 
-  const loadEvents = useCallback(() => lane((ws) => ws.events(100)), [lane]);
+  const subscribeEvents = useCallback(
+    (onBatch: (events: WorkspaceStreamEvent[]) => void) =>
+      lane((ws) => ws.subscribeEvents((batch) => onBatch(batch.events))),
+    [lane],
+  );
 
   return {
     changes,
@@ -263,7 +267,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     discardAll,
     error,
     files,
-    loadEvents,
+    subscribeEvents,
     ready: files !== null,
     reflectLiveContent,
     revertTask,

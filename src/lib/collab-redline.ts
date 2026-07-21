@@ -45,6 +45,24 @@ function whenLabel(createdAt: number | undefined): string {
   return new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function tooltipCard(author: string, when: string, deleted?: string): HTMLElement {
+  const card = document.createElement("div");
+  card.className = "cm-redline-tooltip";
+  const line = document.createElement("div");
+  line.textContent =
+    deleted !== undefined
+      ? `${author} deleted${when ? ` · ${when}` : ""}`
+      : `${author} added${when ? ` · ${when}` : ""}`;
+  card.appendChild(line);
+  if (deleted) {
+    const snippet = document.createElement("div");
+    snippet.className = "cm-redline-tooltip-snippet";
+    snippet.textContent = deleted;
+    card.appendChild(snippet);
+  }
+  return card;
+}
+
 class DeletionFlag extends WidgetType {
   constructor(
     readonly clientId: string,
@@ -68,7 +86,31 @@ class DeletionFlag extends WidgetType {
     flag.dataset.deleted = this.text.slice(0, 200);
     flag.style.color = authorColor(this.clientId, 1);
     flag.textContent = "⌫";
+    // A zero-width widget has no text position for hoverTooltip to map to —
+    // the flag carries its own hover card, styled identically.
+    let card: HTMLElement | null = null;
+    flag.addEventListener("mouseenter", () => {
+      card = tooltipCard(
+        authorLabel(this.clientId),
+        whenLabel(this.createdAt),
+        this.text.slice(0, 200),
+      );
+      card.classList.add("cm-redline-tooltip-floating");
+      const at = flag.getBoundingClientRect();
+      card.style.left = `${at.left}px`;
+      card.style.top = `${at.top}px`;
+      // Inside the editor root so the baseTheme's scoped styles apply
+      // (position: fixed keeps it viewport-anchored regardless of parent).
+      (flag.closest(".cm-editor") ?? document.body).appendChild(card);
+    });
+    flag.addEventListener("mouseleave", () => {
+      card?.remove();
+      card = null;
+    });
     return flag;
+  }
+  override destroy(flag: HTMLElement) {
+    flag.dispatchEvent(new Event("mouseleave"));
   }
 }
 
@@ -131,23 +173,7 @@ function redlineHoverTooltip(): ReturnType<typeof hoverTooltip> {
     const deleted = marked.dataset.deleted;
     return {
       above: true,
-      create: () => {
-        const card = document.createElement("div");
-        card.className = "cm-redline-tooltip";
-        const line = document.createElement("div");
-        line.textContent =
-          deleted !== undefined
-            ? `${author} deleted${when ? ` · ${when}` : ""}`
-            : `${author} added${when ? ` · ${when}` : ""}`;
-        card.appendChild(line);
-        if (deleted) {
-          const snippet = document.createElement("div");
-          snippet.className = "cm-redline-tooltip-snippet";
-          snippet.textContent = deleted;
-          card.appendChild(snippet);
-        }
-        return { dom: card };
-      },
+      create: () => ({ dom: tooltipCard(author, when, deleted) }),
       pos,
     };
   });
@@ -231,6 +257,11 @@ const theme = EditorView.baseTheme({
     fontSize: "12px",
     maxWidth: "320px",
     padding: "6px 12px",
+  },
+  ".cm-redline-tooltip-floating": {
+    position: "fixed",
+    transform: "translateY(calc(-100% - 6px))",
+    zIndex: "70",
   },
   ".cm-redline-tooltip-snippet": {
     marginTop: "4px",
