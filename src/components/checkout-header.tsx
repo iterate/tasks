@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ListFilterIcon, XIcon } from "lucide-react";
+import { ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover.tsx";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -53,8 +54,9 @@ export function CheckoutBreadcrumbs({
 }
 
 /**
- * The Linear-style filter affordance: a quiet button that expands into the
- * filter input (which stays visible while a query is active).
+ * The Linear-style filter affordance: a quiet dropdown button that opens a
+ * small panel with the query input; the button reads "Filtered" while a
+ * query is active.
  */
 export function FilterControl({
   value,
@@ -64,23 +66,25 @@ export function FilterControl({
   onChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const visible = open || value !== "";
   return (
-    <span className="flex items-center gap-1.5">
-      <Button
-        variant={value !== "" ? "secondary" : "ghost"}
-        size="sm"
-        className="h-8 gap-1.5 text-xs"
-        aria-expanded={visible}
-        onClick={() => setOpen(!visible)}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            variant={value !== "" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+          />
+        }
       >
         <ListFilterIcon aria-hidden className="size-3.5" />
         <span className="hidden sm:inline">{value !== "" ? "Filtered" : "Filter"}</span>
-      </Button>
-      {visible ? (
-        <span className="relative">
+        <ChevronDownIcon aria-hidden className="size-3" />
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-72 p-2">
+        <div className="relative">
           <Input
-            autoFocus={open}
+            autoFocus
             value={value}
             onChange={(event) => onChange(event.currentTarget.value)}
             onKeyDown={(event) => {
@@ -88,26 +92,24 @@ export function FilterControl({
                 onChange("");
                 setOpen(false);
               }
+              if (event.key === "Enter") setOpen(false);
             }}
-            placeholder="Filter tasks"
+            placeholder="Filter tasks by title, text, label…"
             aria-label="Filter tasks"
-            className="h-8 w-48 pr-7 text-sm"
+            className="h-8 pr-7 text-sm"
           />
           {value === "" ? null : (
             <button
               type="button"
               aria-label="Clear filter"
               className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              onClick={() => {
-                onChange("");
-                setOpen(false);
-              }}
+              onClick={() => onChange("")}
             >
               <XIcon aria-hidden className="size-3.5" />
             </button>
           )}
-        </span>
-      ) : null}
-    </span>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }

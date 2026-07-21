@@ -45,6 +45,7 @@ export function TaskSheet({
   columns,
   presence,
   changeStatus,
+  focusHeadline,
   onChangeState,
   onRevert,
   onDelete,
@@ -56,6 +57,7 @@ export function TaskSheet({
   columns: string[];
   presence: PresenceUser[];
   changeStatus: TaskChangeStatus | undefined;
+  focusHeadline?: "select" | "end";
   onChangeState: (state: string) => void;
   onRevert: () => void;
   onDelete: () => void;
@@ -163,7 +165,13 @@ export function TaskSheet({
                 <Suspense
                   fallback={<p className="p-4 text-sm text-muted-foreground">opening editor…</p>}
                 >
-                  <TaskEditor path={task.path} text={text} awareness={awareness} />
+                  <TaskEditor
+                    path={task.path}
+                    text={text}
+                    awareness={awareness}
+                    focusHeadline={focusHeadline}
+                    onSubmit={onClose}
+                  />
                 </Suspense>
               )}
             </div>

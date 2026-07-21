@@ -124,12 +124,21 @@ export function TaskEditor({
   path,
   text,
   awareness,
+  focusHeadline,
+  onSubmit,
 }: {
   path: string;
   text: Y.Text;
   awareness: Awareness;
+  /** Place the caret on the first `# heading` after mount: "select" covers
+   * the heading text (typing replaces it), "end" parks after it. */
+  focusHeadline?: "select" | "end";
+  /** ⌘↩ — "I'm done here" (the sheet closes itself). */
+  onSubmit?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const onSubmitRef = useRef(onSubmit);
+  onSubmitRef.current = onSubmit;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -139,7 +148,17 @@ export function TaskEditor({
       state: EditorState.create({
         doc: text.toString(),
         extensions: [
-          keymap.of([...yUndoManagerKeymap, ...defaultKeymap]),
+          keymap.of([
+            {
+              key: "Mod-Enter",
+              run: () => {
+                onSubmitRef.current?.();
+                return true;
+              },
+            },
+            ...yUndoManagerKeymap,
+            ...defaultKeymap,
+          ]),
           EditorView.lineWrapping,
           editorTheme,
           yCollab(text, awareness, { undoManager }),
@@ -149,6 +168,20 @@ export function TaskEditor({
       }),
       parent: container,
     });
+
+    if (focusHeadline !== undefined) {
+      const content = view.state.doc.toString();
+      const heading = /^#\s+(.*)$/m.exec(content);
+      if (heading !== null) {
+        const end = heading.index + heading[0].length;
+        const start = end - (heading[1]?.length ?? 0);
+        view.dispatch({
+          selection: focusHeadline === "select" ? { anchor: start, head: end } : { anchor: end },
+          scrollIntoView: true,
+        });
+      }
+      view.focus();
+    }
 
     // yCollab's own Y observer registered first (at view creation), so by
     // the time this observer runs the CM doc already reflects the event and
@@ -196,6 +229,9 @@ export function TaskEditor({
       view.destroy();
       undoManager.destroy();
     };
+    // focusHeadline is a mount-time hint only — refocusing on every prop
+    // wobble would fight the user's caret.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, awareness]);
 
   useEffect(() => {

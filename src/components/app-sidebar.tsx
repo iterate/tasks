@@ -1,6 +1,6 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronsLeftIcon, FolderGit2Icon, PlusIcon } from "lucide-react";
+import { FolderGit2Icon, PlusIcon } from "lucide-react";
 import { DEFAULT_REPO_PATH, newCheckoutId } from "../lib/checkout-shared.ts";
 import { listCheckouts, listRepos } from "../lib/use-checkout.ts";
 import type { CheckoutIndexEntry } from "../lib/tasks-api.ts";
@@ -8,7 +8,6 @@ import { IterateLogo } from "../ui/iterate-logo.tsx";
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarGroupAction,
   SidebarGroupContent,
@@ -17,8 +16,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarRail,
-  useSidebar,
 } from "../ui/sidebar.tsx";
 
 /**
@@ -96,8 +93,8 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon">
-      <SidebarHeader className="transition-[padding] group-data-[collapsible=icon]:pt-3">
+    <Sidebar collapsible="offcanvas">
+      <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" render={<Link to="/" />} tooltip="Tasks home">
@@ -165,32 +162,7 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
-      <SidebarFooter>
-        <CollapseButton />
-      </SidebarFooter>
-      <SidebarRail />
     </Sidebar>
-  );
-}
-
-function CollapseButton() {
-  const { state, toggleSidebar } = useSidebar();
-  const isCollapsed = state === "collapsed";
-  return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <SidebarMenuButton
-          type="button"
-          size="sm"
-          className="text-sidebar-foreground/70"
-          tooltip={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={toggleSidebar}
-        >
-          <ChevronsLeftIcon className={isCollapsed ? "rotate-180" : undefined} />
-          <span>Collapse sidebar</span>
-        </SidebarMenuButton>
-      </SidebarMenuItem>
-    </SidebarMenu>
   );
 }
 

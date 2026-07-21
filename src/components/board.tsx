@@ -133,7 +133,7 @@ function BoardCell({
     <section
       ref={ref}
       className={cn(
-        "flex min-h-36 w-72 flex-none flex-col pb-4 transition-colors",
+        "group/cell flex min-h-36 w-72 flex-none flex-col pb-4 transition-colors",
         isDropTarget && "rounded-lg bg-accent/40",
       )}
     >
@@ -159,8 +159,9 @@ function BoardCell({
           ))}
         </div>
         <Button
-          variant="outline"
-          className="mt-2 h-10 w-full border-dashed text-muted-foreground"
+          variant="ghost"
+          size="sm"
+          className="mt-1 h-8 w-full justify-center text-xs text-muted-foreground opacity-0 transition-opacity group-hover/cell:opacity-100 focus-visible:opacity-100"
           onClick={() => onAdd(state, rowValue)}
         >
           <PlusIcon aria-hidden className="size-3.5" />
@@ -206,12 +207,10 @@ function BoardCard({
           : undefined
       }
       className={cn(
-        "relative w-full cursor-grab rounded-lg border bg-card p-3 text-left shadow-xs transition-[background-color,border-color,box-shadow,opacity] hover:border-foreground/15 hover:bg-accent/30 hover:shadow-sm active:cursor-grabbing",
-        changeStatus === "added" &&
-          "border-emerald-500/70 bg-emerald-500/5 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.12)] hover:border-emerald-500",
-        changeStatus === "modified" &&
-          "border-amber-500/70 bg-amber-500/5 shadow-[inset_0_0_0_1px_rgba(245,158,11,0.12)] hover:border-amber-500",
-        isDragging && "opacity-40 shadow-none",
+        "relative w-full cursor-grab rounded-md border border-border/70 bg-card p-2.5 text-left transition-[background-color,border-color,box-shadow,opacity] hover:bg-accent/40 active:cursor-grabbing",
+        changeStatus === "added" && "border-emerald-500/50 bg-emerald-500/[0.04]",
+        changeStatus === "modified" && "border-amber-500/50 bg-amber-500/[0.04]",
+        isDragging && "opacity-40",
       )}
     >
       {changeLabel === undefined ? null : (
@@ -237,8 +236,7 @@ function BoardCard({
           ))}
         </span>
       ) : null}
-      <div className={cn("flex items-start gap-2", changeLabel !== undefined && "pr-12")}>
-        <TaskStateIcon state={taskColumnState(task.state)} className="mt-0.5" />
+      <div className={cn("flex items-start", changeLabel !== undefined && "pr-12")}>
         <span className="min-w-0 flex-1 text-sm leading-snug font-medium">{task.title}</span>
       </div>
       {task.summary === "" ? null : (

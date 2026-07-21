@@ -1,8 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
-import { Settings2Icon } from "lucide-react";
+import { PlusIcon, Settings2Icon } from "lucide-react";
+import { Button } from "../ui/button.tsx";
 import {
   DEFAULT_REPO_PATH,
   applyTextEdit,
@@ -241,8 +242,16 @@ function ReadyCheckout({
       search: (prev) => ({ ...prev, group: value === null ? "none" : undefined }),
       replace: true,
     });
-  const setOpenPath = (path: string | null) =>
-    void navigate({ search: (prev) => ({ ...prev, task: path ?? undefined }) });
+  const setOpenPath = (path: string | null, options?: { replace?: boolean }) =>
+    void navigate({
+      search: (prev) => ({ ...prev, task: path ?? undefined }),
+      replace: options?.replace ?? false,
+    });
+  // A just-created task: the sheet opens on it with the caret selecting the
+  // headline, and until it is committed its filename follows the headline
+  // (debounced renames, like apps/os's title-derived paths).
+  const [draftPath, setDraftPath] = useState<string | null>(null);
+  const renamedDraftRef = useRef(false);
 
   const filteredTasks = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();
@@ -357,6 +366,8 @@ function ReadyCheckout({
     }
     const path = inFolder(file.path, folder);
     filesMap.set(path, new Y.Text(file.content));
+    renamedDraftRef.current = false;
+    setDraftPath(path);
     setOpenPath(path);
   };
   const deleteTask = (path: string) => {
@@ -383,6 +394,36 @@ function ReadyCheckout({
   const columns = useMemo(() => columnsForTasks(tasks).map((column) => column.state), [tasks]);
   const openTask = openPath === null ? null : (tasks.find((task) => task.path === openPath) ?? null);
 
+  // While the draft's sheet is open and it is still an uncommitted add, its
+  // filename trails the headline. The rename replaces the Y.Text, so the
+  // editor remounts with the caret parked at the headline's end.
+  useEffect(() => {
+    if (draftPath === null || openPath !== draftPath) return;
+    if (taskChangeByPath.get(draftPath) !== "added") return;
+    const task = tasks.find((candidate) => candidate.path === draftPath);
+    if (task === undefined) return;
+    const target = inFolder(
+      taskPathForTitle(task.title),
+      task.folder === "/" ? null : task.folder,
+    );
+    if (target === draftPath || base[target] !== undefined) return;
+    const timer = setTimeout(() => {
+      const files = checkoutFilesMap(doc);
+      const text = files.get(draftPath);
+      if (text === undefined || files.has(target)) return;
+      const content = text.toString();
+      doc.transact(() => {
+        files.delete(draftPath);
+        files.set(target, new Y.Text(content));
+      });
+      renamedDraftRef.current = true;
+      setDraftPath(target);
+      setOpenPath(target, { replace: true });
+    }, 700);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftPath, openPath, tasks, taskChangeByPath, base, doc]);
+
   return (
     <>
       <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
@@ -394,29 +435,38 @@ function ReadyCheckout({
         </div>
       </header>
       <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
-        <FilterControl value={filter} onChange={setFilter} />
-        <Select
-          items={[
-            { label: "Group: folder", value: "folder" },
-            { label: "No grouping", value: "none" },
-          ]}
-          value={rowField ?? "none"}
-          onValueChange={(value) => setRowField(value === "folder" ? "folder" : null)}
-        >
-          <SelectTrigger aria-label="Board grouping" size="sm" className="h-8 w-fit gap-1.5 text-xs">
-            <Settings2Icon aria-hidden className="size-3.5 text-muted-foreground" />
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="folder">Group: folder</SelectItem>
-            <SelectItem value="none">No grouping</SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="hidden text-xs tabular-nums whitespace-nowrap text-muted-foreground md:inline">
-          {filteredTasks.length}/{tasks.length} tasks
-          {baseCommit ? <> · {baseCommit.slice(0, 7)}</> : null}
-        </span>
-        <div className="ml-auto flex shrink-0 items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => addTask("todo", null)}
+          >
+            <PlusIcon aria-hidden className="size-3.5" />
+            New task
+          </Button>
+          <FilterControl value={filter} onChange={setFilter} />
+          <Select
+            items={[
+              { label: "Group: folder", value: "folder" },
+              { label: "No grouping", value: "none" },
+            ]}
+            value={rowField ?? "none"}
+            onValueChange={(value) => setRowField(value === "folder" ? "folder" : null)}
+          >
+            <SelectTrigger
+              aria-label="Board grouping"
+              size="sm"
+              className="h-8 w-fit gap-1.5 text-xs"
+            >
+              <Settings2Icon aria-hidden className="size-3.5 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="folder">Group: folder</SelectItem>
+              <SelectItem value="none">No grouping</SelectItem>
+            </SelectContent>
+          </Select>
           <CommitControls
             taskChanges={taskChanges}
             commitMessage={commit.commitMessage}
@@ -459,6 +509,13 @@ function ReadyCheckout({
         columns={columns}
         presence={openTask === null ? [] : (presenceByPath.get(openTask.path) ?? [])}
         changeStatus={openTask === null ? undefined : taskChangeByPath.get(openTask.path)}
+        focusHeadline={
+          openTask !== null && openTask.path === draftPath
+            ? renamedDraftRef.current
+              ? "end"
+              : "select"
+            : undefined
+        }
         onChangeState={(state) => {
           if (openTask !== null) writeTask(openTask.path, setTaskCardState(openTask.source, state));
         }}
@@ -468,7 +525,10 @@ function ReadyCheckout({
         onDelete={() => {
           if (openTask !== null) deleteTask(openTask.path);
         }}
-        onClose={() => setOpenPath(null)}
+        onClose={() => {
+          setDraftPath(null);
+          setOpenPath(null);
+        }}
       />
     </>
   );

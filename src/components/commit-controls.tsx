@@ -65,13 +65,20 @@ export function CommitControls({
 }) {
   const dirty = taskChanges.length > 0;
   const busy = commitPending || generatingMessage;
+  const [open, setOpen] = useState(false);
+
+  // A successful commit empties the change set (the new base syncs back);
+  // the review popover has nothing left to say, so it closes itself.
+  useEffect(() => {
+    if (!dirty) setOpen(false);
+  }, [dirty]);
 
   return (
     <div className="flex items-center gap-2">
       {dirty && !commitPending && autoSaveDueAt !== undefined ? (
         <AutoSaveCountdown dueAt={autoSaveDueAt} />
       ) : null}
-      <Popover>
+      <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={<Button variant={dirty ? "default" : "outline"} size="sm" disabled={!dirty} />}
         >

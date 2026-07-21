@@ -1,0 +1,126 @@
+# Collaborative workspaces — design collaboration file
+
+Working file for the Jonas ⇄ Claude design conversation about converging Tasks checkouts
+(and future collaborative surfaces) onto the apps/os workspace abstraction. Keeps verbatim
+requirements, established facts, decisions, and open questions. Update as we go.
+
+## Verbatim requirements from Jonas (2026-07-21)
+
+> "I would like agents to use the standard ITX.workspace API. I would like to be able to do
+> this with really large repos like the @iterate/iterate repo and it should be really
+> performant. Everything should just work."
+
+> "I do think we want [Yjs] just because it works so well … maybe one sub-agent could explore
+> since we already have this stream abstraction. Just using ephemeral events on a workspace or
+> something like that to send the individual character modifications to the stream and all
+> that and stream it to consumers. I'm kind of open to that but I wonder if it would just be
+> too much."
+
+> "i find the idea of giving workspace streams a 'collaborative session mode' quite appealing tbh"
+
+> "we will also have a collaborative Google Docs-style rich text editor for markdown files in
+> there and potentially collaborative source code editing and other things like that. They
+> should all be powered by a workspace. It should work on really really massive repos, really
+> massive. You can assume that we have the repo in the artefact and now we want to collaborate
+> on it and we want to do things such as render the file tree and so on."
+
+> "Of course the workspace is there, this mount concept as well, which adds another dimension
+> that could potentially throw Spanner in the works. … I do want the mounting to exist. I
+> think the way that agents interact with the workspace is an okay API right now. Maybe really
+> let's just lock in what are the APIs and interactions and external requirements of this
+> system."
+
+## Corrections from Jonas
+
+- **2026-07-21**: Claude claimed the iterate monorepo can't be ingested (128MB isolate OOM on
+  isomorphic-git clone). Jonas: wrong — public GitHub repos can now be imported directly
+  through Artifacts. **Verified**: PR #2157 "Import public GitHub repos through Artifacts"
+  (repo-processor events `github-import-requested/started/completed/failed`). Working
+  assumption going forward: *the repo content lives in Artifacts; collaboration is built on
+  top of that substrate.*
+
+## Requirements (locked so far)
+
+1. Agents use the **standard `itx.workspace` API** — current agent-facing surface
+   (readFile/writeFile/edit/glob/gitStatus/gitCommit) is "an okay API right now"; keep it.
+2. **Mounts stay.** Multi-repo mount tables with per-mount commit policy are a core dimension,
+   not an implementation detail to design away.
+3. Works on **really massive repos** (iterate/iterate and beyond), assuming repo-in-Artifacts.
+4. Collaboration surfaces powered by workspaces: **task boards, Google-Docs-style rich text
+   markdown editing, collaborative source-code editing**, file-tree rendering, and more.
+5. Yjs favoured for the collab layer ("it works so well"); streams open question resolved:
+   raw keystroke app-events = no; **Yjs updates as ephemeral stream events + durable
+   snapshots/facts** = the doctrine-compatible shape ("collaborative session mode").
+
+## Established facts (verified against source, 2026-07-21)
+
+- Workspace DO = overlay (DO SQLite + R2 spill >1.5MB) + whiteouts + event-sourced mount
+  table; reads fall through to repo DO at floating HEAD; `gitCommit` routes one mount's diff
+  to that repo's main. No watch/subscribe, no realtime, request-response only.
+- Streams: durable event log first (append = commit point, replay-based processors);
+  **ephemeral events** exist (second-class, eviction-licensed, excluded from replay) with a
+  live subscribe lane at ~1–15ms; precedent = LLM chunk streaming (ephemeral chunks + one
+  durable settled fact). Design envelope R3 already targets 10²–10³ events/sec/stream.
+- Yjs: partial sync within one doc is protocol-impossible (state vectors partition by
+  author). y-partyserver: no subdoc/multiplex support; ~360-line server, doc-name-framing
+  fork viable (Hocuspocus precedent). Scaling shape: metadata index doc + lazy per-file docs.
+- Tasks app today: single Y.Doc per checkout with full file contents + `meta.base` duplicate;
+  breaks ~5k tasks (single-blob persistence cliff, O(all files) reparse per keystroke,
+  unpaginated seeding).
+- Repo DO pre-Artifacts path: isomorphic-git clone into memory, 128MB isolate bound
+  (iterate pack ~21MB → ~290MB inflated). Artifacts import (#2157) is the new path;
+  lazy per-object reads design: `apps/os/tasks/lazy-artifacts-repo-reads.md`.
+- Mounts are whole-repo only today; repo `listFiles()` has no prefix parameter; workspace
+  `glob()` enumerates full tree then filters.
+
+## Direction (agreed so far)
+
+- Endgame: **collaborative session mode on workspaces** — the workspace owns the live
+  collaborative head; `writeFile`-door (agents) and Yjs-door (humans) converge inside the
+  workspace so agent writes splice into live docs when a session is active.
+- Overlay **is** the diff — no separate base-snapshot bookkeeping in app docs.
+- Next deliverable: proposal locking in the APIs, interactions, and external requirements
+  of the whole system. (In progress — sub-agent exploration round running.)
+
+## Proposal
+
+See **[`session-mode-proposal.md`](session-mode-proposal.md)** (2026-07-21 strawman):
+three-tier model (lazy Artifacts base / overlay as settled truth / per-file session DOs),
+agent RPC routed through live sessions, Yjs-over-streams wire, mounts × sessions rules
+(pinned bases, explicit base-motion events, commit barriers), readDir tree API, rich text
+via canonical markdown serialization, 12 invariants, external-requirements ledger, and 7
+contested decisions to argue about.
+
+## Open questions
+
+- Exact read surface Artifacts gives us today vs. needs building (per-oid tree/blob reads,
+  prefix listing, file-tree-at-scale rendering support).
+- How mounts interact with sessions: addressing, commit routing, base motion when a mount's
+  HEAD moves under a live session, whiteouts vs live docs, subtree mounts.
+- Rich text: markdown ↔ Y.XmlFragment round-trip strategy vs plain Y.Text + editor-side
+  structure; one answer for docs-style editing and code editing?
+- Session lifecycle: creation, GC, persistence of live docs vs overlay, offline/reconnect.
+- Presence scopes: repo/workspace-level (who's here, file tree) vs file-level (cursors).
+
+## Log
+
+- 2026-07-21: Initial exploration (4 sub-agents): tasks-app architecture map, workspace
+  domain map, large-repo breakpoints, streams assessment, Yjs-at-scale research. Phased
+  convergence plan sketched (prereqs → tasks restructure → workspace truth + change events
+  → session mode upstream).
+- 2026-07-21: Jonas widens scope to all collaborative surfaces; corrects large-repo import
+  claim (Artifacts import path exists); asks for radical reimagination round + API/
+  requirements proposal. This file created.
+- 2026-07-21: Radical-reimagination round (3 sub-agents): Artifacts substrate contract
+  (import EXISTS, lazy per-oid reads MISSING — probe is the gate; tree objects never
+  deserialized anywhere in the codebase today), industry precedents (Zed/Figma/Google
+  Docs/github.dev/GitBook/Hocuspocus all converge on cold-base/settled/hot-session tiers;
+  agent-via-fs-API into live sessions has no published prior art), mounts × sessions design
+  pass. Synthesized into `session-mode-proposal.md`.
+- 2026-07-21: **Rev 2** after Jonas's pushback on per-file session DOs ("don't cruft up the
+  world with a million durable objects"; "one doc for basically the files that we have
+  touched in this checkout … everything else is a fall through read"). Session unit is now
+  the workspace: one live Y.Doc per workspace hosted by the workspace DO, doc = overlay's
+  live mirror (touched set only), near-stateless (flush-only persistence, epoch on
+  quiesce/commit), no new DO namespace. Cost accepted: all subscribers see all touched-file
+  traffic; size-threshold + per-file split noted as future policy knobs, not built.
