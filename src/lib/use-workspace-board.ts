@@ -79,19 +79,28 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     };
   }, [lane]);
 
-  // Liveness: one cheap status RPC per tick; only files whose dirty state
-  // moved get refetched. (The follow-up for real push is the capnweb
-  // callback-subscription lane — this poll is deliberately boring.)
+  // Liveness: the collab VERSION map is the change cursor — a path whose
+  // head advanced gets refetched even when its status kind is unchanged
+  // (modified → modified was invisible to a kind-only diff). Status refreshes
+  // badges on the same tick; poll errors surface instead of vanishing.
+  const versionsRef = useRef<Record<string, number>>({});
   useEffect(() => {
     const mine = generation.current;
     const timer = setInterval(() => {
-      void lane((ws) => ws.status())
-        .then(async (status) => {
+      void Promise.all([lane((ws) => ws.versions()), lane((ws) => ws.status())])
+        .then(async ([rawVersions, status]) => {
           if (generation.current !== mine) return;
           const next = changeMap(status);
+          const versions = Object.fromEntries(
+            Object.entries(rawVersions).map(([path, version]) => [boardKey(path), version]),
+          );
           const moved = new Set<string>();
+          for (const [path, version] of Object.entries(versions)) {
+            if (versionsRef.current[path] !== version) moved.add(path);
+          }
           for (const [path, kind] of next) if (changes.get(path) !== kind) moved.add(path);
           for (const path of changes.keys()) if (!next.has(path)) moved.add(path);
+          versionsRef.current = versions;
           if (moved.size === 0) return;
           const fetched = await Promise.all(
             [...moved].map(
@@ -110,7 +119,9 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
             return merged;
           });
         })
-        .catch(() => {});
+        .catch((cause: unknown) =>
+          setError(cause instanceof Error ? cause.message : String(cause)),
+        );
     }, POLL_MS);
     return () => clearInterval(timer);
   }, [lane, changes]);

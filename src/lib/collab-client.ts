@@ -28,10 +28,13 @@ export class CollabConnection {
    * unconfirmed local edits across a snapshot re-sync. */
   synced = Text.empty;
   onStatus: (status: string) => void = () => {};
-  /** Set by the page: rebuild the editor from a server snapshot, seeding the
-   * doc with `carriedText` (snapshot + best-effort local unconfirmed). */
-  onReseed: (snapshot: { content: string; epoch: string; version: number }, carriedText: string) => void =
-    () => {};
+  /** Set by the surface: rebuild the editor from a server snapshot. The
+   * second argument is the text of genuinely UNACKED local edits (null when
+   * recovery is clean) — surfaced for review, never silently merged. */
+  onReseed: (
+    snapshot: { ackedSeq: number; content: string; epoch: string; version: number },
+    unsynced: string | null,
+  ) => void = () => {};
 
   constructor(
     readonly checkoutId: string,
@@ -71,7 +74,7 @@ export class CollabConnection {
 
   async wait(afterVersion: number): Promise<CollabWaitResult> {
     return withProject((project) =>
-      this.#lane(project).wait(this.filePath, this.epoch, afterVersion),
+      this.#lane(project).wait(this.filePath, this.epoch, afterVersion, this.clientId),
     );
   }
 
@@ -106,44 +109,6 @@ export class CollabConnection {
     this.synced = Text.of(snapshot.content.split("\n"));
   }
 
-  /**
-   * Best-effort carry of local unconfirmed edits onto a fresh snapshot:
-   * express them as one splice against the confirmed baseline, then re-apply
-   * onto the snapshot — exactly when the touched region is unchanged there;
-   * insert-only (never deleting others' text) when it drifted. Text is never
-   * silently discarded.
-   */
-  carryOnto(snapshotContent: string, localDoc: string): string {
-    const base = this.synced.toString();
-    const splice = commonSplice(base, localDoc);
-    if (splice === null) return snapshotContent;
-    if (snapshotContent.slice(splice.from, splice.to) === base.slice(splice.from, splice.to)) {
-      return (
-        snapshotContent.slice(0, splice.from) + splice.insert + snapshotContent.slice(splice.to)
-      );
-    }
-    const at = Math.min(splice.from, snapshotContent.length);
-    return snapshotContent.slice(0, at) + splice.insert + snapshotContent.slice(at);
-  }
-}
-
-/** The ONE common-prefix/suffix splice used everywhere the client needs
- * "what single replacement turns base into next" (null = identical). */
-export function commonSplice(
-  base: string,
-  next: string,
-): { from: number; insert: string; to: number } | null {
-  if (base === next) return null;
-  let from = 0;
-  const maxFrom = Math.min(base.length, next.length);
-  while (from < maxFrom && base[from] === next[from]) from++;
-  let toBase = base.length;
-  let toNext = next.length;
-  while (toBase > from && toNext > from && base[toBase - 1] === next[toNext - 1]) {
-    toBase--;
-    toNext--;
-  }
-  return { from, insert: next.slice(from, toNext), to: toBase };
 }
 
 const MAX_BACKOFF_MS = 10_000;
@@ -214,15 +179,22 @@ export function peerExtension(connection: CollabConnection, startVersion: number
               return;
             }
             if (result.status === "snapshot") {
-              // Past the floor or epoch rotated: rebuild from the snapshot,
-              // carrying local unconfirmed edits best-effort.
-              const carried = connection.carryOnto(
-                result.snapshot.content,
-                this.view.state.doc.toString(),
-              );
+              // Past the floor or epoch rotated. The server tells us exactly
+              // which of our unconfirmed ops it accepted (ackedSeq); those
+              // are IN the snapshot already. Whatever remains is genuinely
+              // unacked — its inserted text is surfaced for the user, never
+              // guessed into other people's document.
+              const unconfirmed = sendableUpdates(this.view.state);
+              const ackedCount = Math.max(0, result.snapshot.ackedSeq - connection.confirmed + 1);
+              const unacked = unconfirmed.slice(ackedCount);
+              let lost = "";
+              for (const update of unacked) {
+                update.changes.iterChanges((_fromA, _toA, _fromB, _toB, text) => {
+                  if (text.length > 0) lost += (lost === "" ? "" : "\n") + text.toString();
+                });
+              }
               this.done = true;
-              connection.onStatus("re-synced from snapshot");
-              connection.onReseed(result.snapshot, carried);
+              connection.onReseed(result.snapshot, lost === "" ? null : lost);
               return;
             }
             if (result.ops.length === 0) continue;

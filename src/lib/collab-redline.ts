@@ -1,5 +1,6 @@
 import { EditorView, Decoration, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { RangeSetBuilder } from "@codemirror/state";
+import { getSyncedVersion } from "@codemirror/collab";
 import type { CollabConnection } from "./collab-client.ts";
 import type { CollabChangeSegment } from "./tasks-api.ts";
 
@@ -98,11 +99,21 @@ export function redlineExtension(connection: CollabConnection) {
         this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
       }
 
+      generation = 0;
+
       async refresh() {
         if (this.done) return;
+        const mine = ++this.generation;
         try {
           const changes = await connection.changes();
-          if (this.done) return;
+          if (this.done || this.generation !== mine) return; // out-of-order
+          // Segments are in CONFIRMED-head coordinates: install only when the
+          // editor is synced to that head; otherwise keep the current mapped
+          // decorations and try again once the versions agree.
+          if (changes.headVersion !== getSyncedVersion(this.view.state)) {
+            this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
+            return;
+          }
           this.decorations = decorate(changes.segments, this.view.state.doc.length);
           // Nudge a measure/paint without touching the doc.
           this.view.dispatch({});

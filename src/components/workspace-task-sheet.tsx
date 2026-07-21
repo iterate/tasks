@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { useMemo, useState } from "react";
 import { EditorView, keymap, placeholder } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { unifiedMergeView } from "@codemirror/merge";
 import { XIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetTitle } from "../ui/sheet.tsx";
 import { Button } from "../ui/button.tsx";
@@ -10,13 +8,12 @@ import { Badge } from "../ui/badge.tsx";
 import { cn } from "../ui/utils.ts";
 import type { TaskChangeStatus } from "../state.ts";
 import { stateLabel, type BoardTask } from "../lib/board-model.ts";
-import { CollabConnection, commonSplice, peerExtension } from "../lib/collab-client.ts";
-import { redlineExtension } from "../lib/collab-redline.ts";
+import { useCollabEditor } from "../lib/use-collab-editor.ts";
 
 /**
- * The task detail sheet on the WORKSPACE lane: a live collaborative editor
- * (rebase model over the vessel WS) with the redline layers — merge view vs
- * the mount base plus author attribution — where the Yjs sheet had y-collab.
+ * The task detail sheet on the WORKSPACE lane: the shared collab-editor
+ * state machine (rebase model over the vessel WS) with the redline layers
+ * where the Yjs sheet had y-collab.
  */
 export function WorkspaceTaskSheet({
   task,
@@ -85,82 +82,28 @@ function SheetBody({
   onDelete: () => void;
   onClose: () => void;
 }) {
-  const host = useRef<HTMLDivElement | null>(null);
-  const [status, setStatus] = useState("connecting…");
   const [redline, setRedline] = useState(false);
-  const redlineRef = useRef(redline);
-  redlineRef.current = redline;
-  const toggleRef = useRef<((on: boolean) => void) | null>(null);
-
-  useEffect(() => {
-    const connection = new CollabConnection(checkoutId, repoPath, `/${task.path}`);
-    connection.onStatus = setStatus;
-    const redlineLayer = new Compartment();
-    let view: EditorView | null = null;
-    let cancelled = false;
-
-    const redlineExtensions = async (): Promise<Extension> => [
-      unifiedMergeView({ original: (await connection.readBase()) ?? "" }),
-      redlineExtension(connection),
-    ];
-
-    const liveReflector = EditorView.updateListener.of((update) => {
-      if (update.docChanged) onLiveContent(task.path, update.state.doc.toString());
-    });
-
-    const buildState = (content: string, version: number, redlines: Extension) =>
-      EditorState.create({
-        doc: content,
-        extensions: [
-          history(),
-          keymap.of([...defaultKeymap, ...historyKeymap]),
-          EditorView.lineWrapping,
-          placeholder("Write the task as markdown…"),
-          peerExtension(connection, version),
-          liveReflector,
-          redlineLayer.of(redlines),
-          EditorView.theme({
-            "&": { fontSize: "14px", height: "100%" },
-            ".cm-content": { fontFamily: "var(--font-mono, ui-monospace)", padding: "16px" },
-          }),
-        ],
-      });
-
-    toggleRef.current = (on: boolean) => {
-      void (async () => {
-        const extensions = on ? await redlineExtensions() : [];
-        view?.dispatch({ effects: redlineLayer.reconfigure(extensions) });
-      })();
-    };
-
-    connection.onReseed = (snapshot, carried) => {
-      if (cancelled || view === null) return;
-      connection.reseed(snapshot);
-      view.setState(buildState(snapshot.content, snapshot.version, []));
-      const splice = commonSplice(snapshot.content, carried);
-      if (splice !== null) view.dispatch({ changes: splice });
-      toggleRef.current?.(redlineRef.current);
-    };
-
-    void connection
-      .open()
-      .then((opened) => {
-        if (cancelled || host.current === null) return;
-        view = new EditorView({
-          parent: host.current,
-          state: buildState(opened.content, opened.version, []),
-        });
-        setStatus("live");
-      })
-      .catch((cause: unknown) =>
-        setStatus(`failed: ${cause instanceof Error ? cause.message : String(cause)}`),
-      );
-    return () => {
-      cancelled = true;
-      toggleRef.current = null;
-      view?.destroy();
-    };
-  }, [checkoutId, repoPath, task.path, onLiveContent]);
+  const extensions = useMemo(
+    () => [
+      history(),
+      keymap.of([...defaultKeymap, ...historyKeymap]),
+      EditorView.lineWrapping,
+      placeholder("Write the task as markdown…"),
+      EditorView.theme({
+        "&": { fontSize: "14px", height: "100%" },
+        ".cm-content": { fontFamily: "var(--font-mono, ui-monospace)", padding: "16px" },
+      }),
+    ],
+    [],
+  );
+  const editor = useCollabEditor({
+    checkoutId,
+    extensions,
+    onLiveContent,
+    path: task.path,
+    redline,
+    repoPath,
+  });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -195,7 +138,7 @@ function SheetBody({
           onClick={() => {
             const next = !redline;
             setRedline(next);
-            toggleRef.current?.(next);
+            editor.toggle(next);
           }}
         >
           Changes
@@ -209,9 +152,20 @@ function SheetBody({
       </div>
       <div className="flex items-center gap-2 border-b px-4 py-1 font-mono text-[11px] text-muted-foreground">
         <span className="truncate">{task.path}</span>
-        <span className="ml-auto">{status}</span>
+        <span className="ml-auto">{editor.status}</span>
       </div>
-      <div ref={host} className="min-h-0 flex-1 overflow-auto" />
+      {editor.recovery !== null && (
+        <div className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-900">
+          <div className="flex items-center gap-2">
+            <span>Unaccepted text from before the re-sync (not in the document):</span>
+            <button type="button" className="ml-auto underline" onClick={editor.dismissRecovery}>
+              dismiss
+            </button>
+          </div>
+          <pre className="mt-1 rounded bg-white/60 p-2 whitespace-pre-wrap">{editor.recovery}</pre>
+        </div>
+      )}
+      <div ref={editor.host} className="min-h-0 flex-1 overflow-auto" />
     </div>
   );
 }

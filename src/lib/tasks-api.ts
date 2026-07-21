@@ -86,7 +86,7 @@ export type CollabAcceptResult =
   | { status: "too-large"; maxBytes: number };
 export type CollabWaitResult =
   | { ops: { changes: unknown; clientId: string }[]; status: "ops" }
-  | { snapshot: { content: string; epoch: string; version: number }; status: "snapshot" }
+  | { snapshot: { ackedSeq: number; content: string; epoch: string; version: number }; status: "snapshot" }
   /** The session was durably ended (deleted/replaced/reset) — reopen to resume. */
   | { status: "ended" };
 
@@ -95,6 +95,7 @@ export type CollabChangeSegment =
   | { at: number; clientId: string; kind: "deleted"; text: string };
 
 export type CollabChanges = {
+  baseContent: string;
   baseVersion: number;
   headVersion: number;
   segments: CollabChangeSegment[];
@@ -114,7 +115,14 @@ export interface TasksWorkspace {
     path: string;
   }): Promise<CollabAcceptResult>;
   /** Long-poll: ops after a version (parking ~20s), or a snapshot past the floor. */
-  wait(filePath: string, epoch: string, afterVersion: number): Promise<CollabWaitResult>;
+  wait(
+    filePath: string,
+    epoch: string,
+    afterVersion: number,
+    clientId?: string,
+  ): Promise<CollabWaitResult>;
+  /** Head versions of every live session — the board's change cursor. */
+  versions(): Promise<Record<string, number>>;
   /** Every task file in the merged view (board seed). */
   files(): Promise<Record<string, string>>;
   /** Filesystem trio with the platform gateway's semantics: live sessions

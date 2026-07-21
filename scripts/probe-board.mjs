@@ -82,7 +82,13 @@ if (post.includes("fault-harness.md")) {
 }
 const log = JSON.stringify(await board.log(3));
 if (!log.includes("board probe")) throw new Error(`commit missing from log: ${log.slice(0, 200)}`);
-ok("overlay cleared, commit on main, board reads settle through the mount");
+// The assertion that matters: the COMMITTED content (read now falls through
+// to the mount) contains the exact live-session marker.
+const committedText = await board.read(FILE);
+if (!committedText || !committedText.includes(marker)) {
+  throw new Error("committed content is missing the live-session marker");
+}
+ok("overlay cleared, commit on main CONTAINS the live edit, reads settle through the mount");
 
 console.log("checkout=workspace: all green");
 process.exit(0);

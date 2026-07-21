@@ -275,8 +275,14 @@ type WorkspaceStub = {
       ops: { changes: unknown; clientSeq: number }[];
       path: string;
     }): Promise<CollabAcceptResult>;
-    wait(path: string, epoch: string, afterVersion: number): Promise<CollabWaitResult>;
+    wait(
+      path: string,
+      epoch: string,
+      afterVersion: number,
+      clientId?: string,
+    ): Promise<CollabWaitResult>;
     changes(path: string): Promise<CollabChanges>;
+    versions(): Promise<Record<string, number>>;
   };
   readBase(path: string): Promise<string | null>;
   glob(pattern: string): Promise<string[]>;
@@ -320,7 +326,11 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       const workspaces = (
         project as unknown as { workspaces: { get(path: string): WorkspaceStub } }
       ).workspaces;
-      const ws = workspaces.get(`/workspaces/tasks/${this.#checkoutId}`);
+      // The workspace identity ENCODES the repo: the same checkout id against
+      // a different repository is a different workspace — it can never
+      // silently bind to (and edit) the first repository's workspace.
+      const repoSlug = this.#repoPath.replace(/^\/+/, "").replaceAll("/", "--");
+      const ws = workspaces.get(`/workspaces/tasks/${this.#checkoutId}~${repoSlug}`);
       try {
         return await operation(ws);
       } catch (error) {
@@ -362,8 +372,17 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
     return this.#withWorkspace((ws) => ws.collab.push(input));
   }
 
-  wait(filePath: string, epoch: string, afterVersion: number): Promise<CollabWaitResult> {
-    return this.#withWorkspace((ws) => ws.collab.wait(filePath, epoch, afterVersion));
+  wait(
+    filePath: string,
+    epoch: string,
+    afterVersion: number,
+    clientId?: string,
+  ): Promise<CollabWaitResult> {
+    return this.#withWorkspace((ws) => ws.collab.wait(filePath, epoch, afterVersion, clientId));
+  }
+
+  versions(): Promise<Record<string, number>> {
+    return this.#withWorkspace((ws) => ws.collab.versions());
   }
 
   /** Every task file in the merged view, path → content (board seed).
