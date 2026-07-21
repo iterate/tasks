@@ -1,4 +1,5 @@
 import type { TaskCard } from "../state.ts";
+import type { TaskChangeStatus } from "../state.ts";
 import { parseTaskCard } from "../tasks-model.ts";
 
 /** A card plus what the board needs to place and preview it. */
@@ -106,4 +107,24 @@ function taskSummary(source: string): { text: string; from: number } {
     lineOffset += line.length + 1;
   }
   return { text: "", from: bodyOffset };
+}
+
+/** Optimistic change-status transition for a local write: a path the board
+ * has never seen is an ADD; a known one keeps its status (added stays
+ * added) or becomes modified. */
+export function changeAfterWrite(
+  current: TaskChangeStatus | undefined,
+  known: boolean,
+): TaskChangeStatus {
+  if (current !== undefined) return current;
+  return known ? "modified" : "added";
+}
+
+/** Optimistic transition for a local delete: deleting an uncommitted ADD
+ * erases the change entirely (nothing existed at base); anything else is a
+ * deletion. Returns null to clear the entry. */
+export function changeAfterDelete(
+  current: TaskChangeStatus | undefined,
+): TaskChangeStatus | null {
+  return current === "added" ? null : "deleted";
 }

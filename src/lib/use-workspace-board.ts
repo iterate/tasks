@@ -3,7 +3,7 @@ import { withProject } from "./use-checkout.ts";
 import type { TasksWorkspace, WorkspaceStreamEvent } from "./tasks-api.ts";
 import type { TaskChangeStatus, TaskChangeSummary } from "../state.ts";
 import { isTaskFilePath, parseTaskCard } from "../tasks-model.ts";
-import { toBoardTask, type BoardTask } from "./board-model.ts";
+import { changeAfterDelete, changeAfterWrite, toBoardTask, type BoardTask } from "./board-model.ts";
 
 /**
  * The board's data layer on the WORKSPACE mechanism: the platform overlay is
@@ -164,8 +164,18 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   /** Optimistic local write + the same platform write an agent would make. */
   const writeTask = useCallback(
     (path: string, content: string) => {
-      setFiles((current) => (current === null ? current : { ...current, [path]: content }));
-      setChanges((current) => new Map(current).set(path, current.get(path) ?? "modified"));
+      setFiles((current) => {
+        // The transition needs to know if the path existed BEFORE this write
+        // (unknown path = an ADD, not a modification), so status updates
+        // inside the same setter that sees the pre-write files.
+        setChanges((changes) =>
+          new Map(changes).set(
+            path,
+            changeAfterWrite(changes.get(path), current?.[path] !== undefined),
+          ),
+        );
+        return current === null ? current : { ...current, [path]: content };
+      });
       void lane((ws) => ws.write(`/${path}`, content)).catch((cause: unknown) =>
         setError(cause instanceof Error ? cause.message : String(cause)),
       );
@@ -179,6 +189,15 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         if (current === null) return current;
         const { [path]: _gone, ...rest } = current;
         return rest;
+      });
+      // Deleted cards belong on the Deleted strip immediately — and deleting
+      // an uncommitted add erases the change instead of leaving a phantom.
+      setChanges((current) => {
+        const next = new Map(current);
+        const transitioned = changeAfterDelete(current.get(path));
+        if (transitioned === null) next.delete(path);
+        else next.set(path, transitioned);
+        return next;
       });
       void lane((ws) => ws.delete(`/${path}`)).catch(() => {});
     },

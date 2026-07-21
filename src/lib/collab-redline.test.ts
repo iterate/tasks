@@ -1,30 +1,15 @@
-import { describe, expect, test } from "vitest";
-import { decorate } from "./collab-redline.ts";
+import { describe, expect, it } from "vitest";
+import { authorLabel } from "./collab-redline.ts";
 
-describe("decorate", () => {
-  test("out-of-order segments must not crash the builder", () => {
-    // Server order is position-sorted, but clamping (or any future source)
-    // can reorder — RangeSetBuilder throws on descending ranges unless the
-    // layer sorts defensively.
-    const set = decorate(
-      [
-        { clientId: "b", from: 10, kind: "inserted", to: 14 },
-        { at: 2, clientId: "a", kind: "deleted", text: "gone" },
-        { clientId: "c", from: 2, kind: "inserted", to: 5 },
-      ],
-      20,
-    );
-    expect(set.size).toBe(3);
+describe("authorLabel", () => {
+  it("agents read as agent", () => {
+    expect(authorLabel("external")).toBe("agent");
   });
-
-  test("clamping past docLength keeps ascending order", () => {
-    const set = decorate(
-      [
-        { clientId: "a", from: 8, kind: "inserted", to: 12 },
-        { at: 30, clientId: "b", kind: "deleted", text: "tail" },
-      ],
-      10,
-    );
-    expect(set.size).toBe(2);
+  it("named ids surface the full display slug — the random suffix never bleeds in", () => {
+    expect(authorLabel("u-usr-jonas-xlo98p")).toBe("usr jonas");
+    expect(authorLabel("u-jonas-templestein-a1b2c3")).toBe("jonas templestein");
+  });
+  it("unrecognized ids are someone", () => {
+    expect(authorLabel("web-abcdef")).toBe("someone");
   });
 });

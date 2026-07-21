@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toBoardTask } from "./board-model.ts";
+import { changeAfterDelete, changeAfterWrite, toBoardTask } from "./board-model.ts";
 import { matchesFilter, projectBoard } from "./board-engine.ts";
 import { setTaskCardLabels } from "../tasks-model.ts";
 
@@ -89,3 +89,22 @@ describe("frontmatter resilience", () => {
     expect(task.title).toBe("tasks/sub/quiet.md");
   });
 });
+
+describe("optimistic change transitions", () => {
+  it("first write of an unknown path is an ADD, not modified", () => {
+    expect(changeAfterWrite(undefined, false)).toBe("added");
+  });
+  it("first write of a known (seeded) path is a modification", () => {
+    expect(changeAfterWrite(undefined, true)).toBe("modified");
+  });
+  it("a later write keeps the existing status", () => {
+    expect(changeAfterWrite("added", true)).toBe("added");
+    expect(changeAfterWrite("deleted", true)).toBe("deleted");
+  });
+  it("deleting an uncommitted add clears the change; others become deleted", () => {
+    expect(changeAfterDelete("added")).toBeNull();
+    expect(changeAfterDelete("modified")).toBe("deleted");
+    expect(changeAfterDelete(undefined)).toBe("deleted");
+  });
+});
+
