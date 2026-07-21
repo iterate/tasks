@@ -1,6 +1,5 @@
-import { useState } from "react";
 import type YProvider from "y-partyserver/provider";
-import { localCollabUser, renameCollabUser } from "../lib/use-checkout.ts";
+import { localCollabUser, renameCollabUser, type CollabUser } from "../lib/use-checkout.ts";
 import type { TasksUser } from "../lib/tasks-api.ts";
 import type { Peer } from "../lib/board-model.ts";
 import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar.tsx";
@@ -21,24 +20,27 @@ export function PresenceAvatars({
   peers: Peer[];
   me: TasksUser | null;
 }) {
-  const [self, setSelf] = useState(() =>
-    typeof window === "undefined" ? null : localCollabUser(),
-  );
-  if (self === null) return null;
-  const selfName = me?.name ?? me?.email ?? self.name;
+  if (typeof window === "undefined") return null;
+  // The awareness local state is the single source of truth for how this
+  // browser presents itself — applyVerifiedIdentity and renames both write
+  // it, and the page re-renders on every awareness change, so this stays
+  // live without local state of its own.
+  const self =
+    (provider.awareness.getLocalState() as { user?: CollabUser } | null)?.user ??
+    localCollabUser();
   return (
     <span className="flex items-center -space-x-1.5">
       <PresenceAvatar
-        name={selfName}
+        name={self.name}
         color={self.color}
-        image={me?.image ?? null}
-        email={me?.email ?? null}
-        userId={me?.userId ?? null}
+        image={self.image ?? me?.image ?? null}
+        email={self.email ?? me?.email ?? null}
+        userId={self.userId ?? me?.userId ?? null}
         openPath={null}
         hint="You — click to rename"
         onClick={() => {
-          const name = window.prompt("Your collaborator name", selfName);
-          if (name?.trim()) setSelf(renameCollabUser(provider, name));
+          const name = window.prompt("Your collaborator name", self.name);
+          if (name?.trim()) renameCollabUser(provider, name);
         }}
       />
       {peers.map((peer) => (

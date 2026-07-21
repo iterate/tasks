@@ -30,6 +30,13 @@ requirements, established facts, decisions, and open questions. Update as we go.
 > let's just lock in what are the APIs and interactions and external requirements of this
 > system."
 
+> "I wonder what would happen in the lock file case where we have truly massive files …
+> I don't even know how that will work with CloudFlare's WebSocket message cap. … would
+> there be OT transform events? … I wonder also maybe you can think about what is a way we
+> can prove out that this design works, right? Including through the extra hop of the
+> tasks app. … It needs to be ergonomic to do maybe somehow with a local app/os dev server
+> and a local tasks dev server strung together in just the right way."
+
 ## Corrections from Jonas
 
 - **2026-07-21**: Claude claimed the iterate monorepo can't be ingested (128MB isolate OOM on
@@ -124,3 +131,16 @@ contested decisions to argue about.
   live mirror (touched set only), near-stateless (flush-only persistence, epoch on
   quiesce/commit), no new DO namespace. Cost accepted: all subscribers see all touched-file
   traffic; size-threshold + per-file split noted as future policy knobs, not built.
+- 2026-07-21: **Wild round** (Jonas: "go a bit more wild … the extreme option where we
+  just say everything is just streams, there's no Yjs, we implement whatever 500 lines we
+  need ourselves"; also asked for a Codex/gpt-5.6-sol xhigh second opinion). Three
+  independent evaluations converged 3–0 → **Rev 3**: no Yjs; per-file rebase engines
+  (@codemirror/collab 188 LOC + prosemirror-collab 184 LOC, vendored; authority =
+  workspace DO, history = per file); WAL-before-ack (2s loss window rejected); keystrokes
+  on a hibernating WS at the workspace DO, NOT the journaled stream ("ephemeral" stream
+  events still write journal rows in a different DO — double-write + atomicity gap;
+  `publishVolatile` is the platform ask if streams-must-carry-it); dirty ≠ live; epochs
+  for destruction only; bounded-offline (24h floor + three-way recovery). Rev 2 rejected
+  by adversarial review (1MiB WS cap wedges the workspace doc; every deploy = epoch;
+  tombstones never GC; per-mount auth impossible). Top program risk: markdown↔ProseMirror
+  fidelity. Yjs re-entry gate defined. PoC plan written → `poc-plan.md`.

@@ -6,7 +6,91 @@ Docs, github.dev, Replit, GitBook, Hocuspocus/Y-Sweet), and a mounts × sessions
 against workspace-core/streams source. Companion file: `collaborative-workspaces.md`
 (requirements, facts, log).
 
-## Rev 2 (2026-07-21): the session unit is the WORKSPACE, not the file
+## Rev 3 (2026-07-21): no Yjs — per-file rebase engines in one workspace DO
+
+Three independent evaluations (adversarial review of Rev 2, a streams-only/no-Yjs design
+study, and a Codex gpt-5.6-sol xhigh second opinion) converged 3–0. Rev 2 as written is
+rejected; Rev 1's per-file DOs stay rejected. The synthesis:
+
+**Authority granularity = workspace. History granularity = file.** (Codex's framing.)
+One workspace DO hosts independent per-file engines: CodeMirror `ChangeSet` log for
+code/markdown-source, ProseMirror `Step` log for rich text. No Yjs, no CRDT: with a single
+totally-ordered authority, the editors' own first-party collab modules
+(@codemirror/collab, 188 LOC; prosemirror-collab, 184 LOC; both vendorable, fuzzed
+upstream, position-mapping ships inside the editors) give optimistic local editing +
+rebase of unconfirmed ops. Convergence is trivial (confirmed doc = fold of one log — the
+Google Docs/Etherpad model). Per-user undo is native (`addToHistory: false` on remote
+transactions). Agent writes become a server-side diff applied at head — no merge exists.
+
+**Corrections adopted from the reviews (over Rev 1 AND Rev 2):**
+
+1. **Dirty ≠ live.** A collab engine exists only for files with active collaborative
+   consumers. Agent writes to closed files go straight to the overlay (no engine, no op
+   history, just coalesced `files-changed` ticks). Bounds the live set by open editors,
+   not by agent behavior — kills Rev 2's bulk-refactor blast radius.
+2. **WAL before ack — the ~2s loss window is rejected.** Accepted op batches append to a
+   same-DO SQLite WAL (batched ~50ms) before acknowledgement; collaborative editors never
+   ack a keystroke and then lose it (Figma learned this publicly). Snapshot every ~256
+   ops; overlay settle at 2s idle/15s max + barriers. WAL = crash truth; overlay =
+   file/git truth. Restores invariant 9, which Rev 2 had silently voided.
+3. **Keystrokes do NOT ride the journaled stream.** The platform's "ephemeral" events
+   still write offset-allocated journal rows and live in a *different DO* than the
+   workspace (double-write + cross-DO atomicity gap). Hot path: hibernating WebSocket
+   terminating at the workspace DO (Cloudflare-recommended, ~50–100ms batching). Streams
+   keep: lifecycle facts, `files-changed`, head-moved, presence roster, low-rate cursor
+   summaries. If "everything on the stream" stays a goal, the platform ask is a genuinely
+   non-journaled `publishVolatile` lane — until then, direct WS.
+4. **Epochs are for destruction only** (reset/revert, mode switch, external base
+   replacement) — never for last-leave. Bounded offline instead: ~24h op-history floor
+   per engine, IndexedDB client cache, `history-miss` → snapshot + three-way recovery,
+   never silently discard pending local ops. Rev 2's every-deploy-is-an-epoch problem
+   dies with the WAL.
+5. **Per-file integer versions, persisted** (monotonic across DO restarts); stream
+   offsets are transport cursors, never collab clocks. Idempotency via
+   `(path, epoch, clientId, clientSeq)` + batchId.
+6. **Massive files** (the lockfile case): ops are deltas, so wire cost tracks edit size,
+   not file size. The 1MiB WS cap threatens only snapshots-on-open and monster ops (agent
+   rewrites a 5MB file) — both resolved by the snapshot lane that must exist anyway
+   (history floor): snapshots fetch over HTTP/chunked frames; an oversized op broadcasts
+   as `reseed {path, version}` and clients refetch. Plus a size threshold: files over ~N
+   MB get no live engine (view/RPC-only). Most lockfile traffic never touches collab at
+   all, per correction 1.
+7. **Rich text**: PM document is the live authority, overlay stays canonical markdown;
+   versioned parser/schema/serializer; v1 uses PM's official reject-and-client-rebase
+   (no bespoke server-side Step transform); agent markdown writes parse → tree diff
+   (`findDiffStart`/`findDiffEnd`) → replacement steps. **Markdown↔PM fidelity is risk #1
+   of the whole program** — unknown syntax must round-trip through opaque nodes or rich
+   mode refuses the file; never silently normalize. BlockNote/Tiptap-on-prosemirror-collab
+   is proven (Convex prosemirror-sync) but their cursors/comments polish is Yjs-shaped —
+   budget owned UX. A Yjs island for rich text only remains a fallback.
+8. **Long-lived anchors** (comments/review pins surviving heavy rewriting + compaction)
+   are the one place CRDT relative positions would genuinely help — acknowledged open
+   design area, sidecar-state + re-anchoring regardless.
+
+**What survives from earlier revs**: touched-set/live-set liveness; flush-is-writeFile;
+in-process barriers (all engines + agent RPC + commits share the workspace write chain);
+mounts × sessions rules (per-engine base pins, explicit head-moved/conflicted, transition
+safety counts live engines as dirty); `readDir`/tree/search-first; presence two-scope
+model; agent API byte-for-byte unchanged (`readFile` materializes the live head; `edit`
+is the concurrency-safe primitive and its stale-match failure is correct backpressure;
+`writeFile` remains whole-file replace semantics — documented, not "fixed").
+
+Owned-code estimate (honest): ~350–550 lines for the CM6 core slice (authority state
+machine + client provider glue); ~2,000 total with cursors (~250, y-remote-selections is
+MIT-copyable), reconnect polish, rich-text lane, and the fault-injection test suite a
+core primitive deserves — replacing the entire y-* dependency stack with JSON ops +
+integer versions + plain text.
+
+De-risk order (Codex, adopted): CM6 single-file vertical slice → fault harness (kill DO
+at every persistence boundary; duplicate/reorder/drop fan-out; assert acked-op survival +
+convergence) → ProseMirror lane → load test (20–100 clients, 10 hot files, agent touching
+10k closed files). Decision gate: adopt Yjs only if the prototype proves bounded-offline
+recovery, anchors, or editor rebasing can't meet requirements. See `poc-plan.md` for the
+tasks-app-integrated proof.
+
+---
+
+## Rev 2 (2026-07-21): the session unit is the WORKSPACE, not the file — **REJECTED by Rev 3, kept for the record**
 
 Jonas's pushback on Rev 1's one-DO-per-(workspace, filePath):
 

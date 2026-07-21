@@ -429,6 +429,7 @@ function ReadyCheckout({
         <SidebarTrigger className="-ml-1" />
         <CheckoutBreadcrumbs repoPath={repoPath} checkoutId={checkoutId} />
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <PresenceAvatars provider={provider} peers={peers} me={me} />
           <div className="hidden items-center gap-1.5 sm:flex">
             <ShareButton />
             <FilterControl value={filter} onChange={setFilter} />
@@ -442,7 +443,6 @@ function ReadyCheckout({
               onChangeGroup={setRowField}
             />
           </div>
-          <PresenceAvatars provider={provider} peers={peers} me={me} />
           <CommitControls
             taskChanges={taskChanges}
             commitMessage={commit.commitMessage}
