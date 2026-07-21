@@ -9,6 +9,7 @@ import { cn } from "../ui/utils.ts";
 import type { TaskChangeStatus } from "../state.ts";
 import { stateLabel, type BoardTask } from "../lib/board-model.ts";
 import { useCollabEditor } from "../lib/use-collab-editor.ts";
+import { TagPicker } from "./tag-picker.tsx";
 
 /**
  * The task detail sheet on the WORKSPACE lane: the shared collab-editor
@@ -20,9 +21,12 @@ export function WorkspaceTaskSheet({
   checkoutId,
   repoPath,
   columns,
+  allTags,
   changeStatus,
   onLiveContent,
   onChangeState,
+  onChangeLabels,
+  onRevert,
   onDelete,
   onClose,
 }: {
@@ -30,9 +34,12 @@ export function WorkspaceTaskSheet({
   checkoutId: string;
   repoPath: string;
   columns: string[];
+  allTags: string[];
   changeStatus: TaskChangeStatus | undefined;
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
+  onChangeLabels: (labels: string[]) => void;
+  onRevert: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -49,9 +56,12 @@ export function WorkspaceTaskSheet({
             checkoutId={checkoutId}
             repoPath={repoPath}
             columns={columns}
+            allTags={allTags}
             changeStatus={changeStatus}
             onLiveContent={onLiveContent}
             onChangeState={onChangeState}
+            onChangeLabels={onChangeLabels}
+            onRevert={onRevert}
             onDelete={onDelete}
             onClose={onClose}
           />
@@ -66,9 +76,12 @@ function SheetBody({
   checkoutId,
   repoPath,
   columns,
+  allTags,
   changeStatus,
   onLiveContent,
   onChangeState,
+  onChangeLabels,
+  onRevert,
   onDelete,
   onClose,
 }: {
@@ -76,9 +89,12 @@ function SheetBody({
   checkoutId: string;
   repoPath: string;
   columns: string[];
+  allTags: string[];
   changeStatus: TaskChangeStatus | undefined;
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
+  onChangeLabels: (labels: string[]) => void;
+  onRevert: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
@@ -150,9 +166,15 @@ function SheetBody({
           <XIcon className="size-4" />
         </Button>
       </div>
-      <div className="flex items-center gap-2 border-b px-4 py-1 font-mono text-[11px] text-muted-foreground">
-        <span className="truncate">{task.path}</span>
-        <span className="ml-auto">{editor.status}</span>
+      <div className="flex items-center gap-2 border-b px-4 py-1 text-[11px] text-muted-foreground">
+        <span className="truncate font-mono">{task.path}</span>
+        <TagPicker value={task.labels} options={allTags} onChange={onChangeLabels} />
+        {changeStatus !== undefined && (
+          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={onRevert}>
+            Revert
+          </Button>
+        )}
+        <span className="ml-auto font-mono">{editor.status}</span>
       </div>
       {editor.recovery !== null && (
         <div className="border-b bg-amber-500/10 px-4 py-2 text-xs text-amber-900">

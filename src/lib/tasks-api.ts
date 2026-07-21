@@ -133,6 +133,8 @@ export interface TasksWorkspace {
   read(path: string): Promise<string | null>;
   write(path: string, content: string): Promise<void>;
   delete(path: string): Promise<boolean>;
+  /** Back to the mount's version: restore a delete, drop an add, undo edits. */
+  revert(path: string): Promise<void>;
   // Git passthroughs stay platform-shaped; the pinned client predates them.
   status(): Promise<unknown>;
   commit(message: string): Promise<unknown>;

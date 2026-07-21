@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { withProject } from "./use-checkout.ts";
 import type { TasksWorkspace } from "./tasks-api.ts";
-import type { TaskChangeStatus } from "../state.ts";
-import { isTaskFilePath } from "../tasks-model.ts";
+import type { TaskChangeStatus, TaskChangeSummary } from "../state.ts";
+import { isTaskFilePath, parseTaskCard } from "../tasks-model.ts";
 import { toBoardTask, type BoardTask } from "./board-model.ts";
 
 /**
@@ -166,6 +166,51 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     );
   }, []);
 
+  /** Change summaries in the shape the commit controls speak. */
+  const taskChanges = useMemo<TaskChangeSummary[]>(
+    () =>
+      [...changes.entries()]
+        .map(([path, status]) => ({
+          path,
+          status,
+          title:
+            files?.[path] !== undefined
+              ? parseTaskCard(path, files[path]).title
+              : (path.split("/").at(-1) ?? path),
+        }))
+        .sort((left, right) => left.path.localeCompare(right.path)),
+    [changes, files],
+  );
+
+  /** Back to the mount's version — restore a delete, drop an add, undo edits. */
+  const revertTask = useCallback(
+    (path: string) => {
+      void lane(async (ws) => {
+        await ws.revert(`/${path}`);
+        const content = await ws.read(`/${path}`);
+        setFiles((current) => {
+          if (current === null) return current;
+          const merged = { ...current };
+          if (content === null) delete merged[path];
+          else merged[path] = content;
+          return merged;
+        });
+        setChanges((current) => {
+          const next = new Map(current);
+          next.delete(path);
+          return next;
+        });
+      }).catch((cause: unknown) =>
+        setError(cause instanceof Error ? cause.message : String(cause)),
+      );
+    },
+    [lane],
+  );
+
+  const discardAll = useCallback(() => {
+    for (const path of changes.keys()) revertTask(path);
+  }, [changes, revertTask]);
+
   const commit = useCallback(
     async (message: string) => {
       const result = await lane((ws) => ws.commit(message));
@@ -184,10 +229,13 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     changes,
     commit,
     deleteTask,
+    discardAll,
     error,
     files,
     ready: files !== null,
     reflectLiveContent,
+    revertTask,
+    taskChanges,
     tasks,
     writeTask,
   };

@@ -289,6 +289,7 @@ type WorkspaceStub = {
   readFile(path: string): Promise<string | null>;
   writeFile(path: string, content: string): Promise<void>;
   deleteFile(path: string): Promise<boolean>;
+  revert(path: string): Promise<void>;
   git: {
     status(): Promise<unknown>;
     commit(input: { message: string }): Promise<unknown>;
@@ -416,6 +417,10 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
 
   delete(path: string): Promise<boolean> {
     return this.#withWorkspace((ws) => ws.deleteFile(path));
+  }
+
+  revert(path: string): Promise<void> {
+    return this.#withWorkspace((ws) => ws.revert(path));
   }
 
   status(): Promise<unknown> {

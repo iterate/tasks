@@ -1,27 +1,45 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
-import { GitCommitVerticalIcon, ListFilterIcon, Rows3Icon } from "lucide-react";
-import { Button } from "../ui/button.tsx";
-import { Input } from "../ui/input.tsx";
+import { SidebarTrigger } from "../ui/sidebar.tsx";
 import { Board } from "../components/board.tsx";
+import {
+  CheckoutBreadcrumbs,
+  FilterControl,
+  GroupControl,
+  MobileOverflow,
+  ShareButton,
+} from "../components/checkout-header.tsx";
+import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
 import { WorkspaceTaskSheet } from "../components/workspace-task-sheet.tsx";
 import { useWorkspaceBoard } from "../lib/use-workspace-board.ts";
-import { DEFAULT_REPO_PATH, normalizeRepoPath } from "../lib/checkout-shared.ts";
-import { columnsForTasks, newTaskFile, setTaskCardState, taskColumnState } from "../tasks-model.ts";
+import { useTaskCommit } from "../lib/use-task-commit.ts";
 import { projectBoard } from "../lib/board-engine.ts";
-import type { BoardTask } from "../lib/board-model.ts";
+import type { BoardTask, RowField } from "../lib/board-model.ts";
+import { DEFAULT_REPO_PATH, normalizeRepoPath } from "../lib/checkout-shared.ts";
+import {
+  columnsForTasks,
+  fallbackCommitMessage,
+  newTaskFile,
+  setTaskCardLabels,
+  setTaskCardState,
+  taskColumnState,
+} from "../tasks-model.ts";
 
 /**
- * The tasks board on the WORKSPACE mechanism — same dialect as the Yjs
- * checkout board (folder swimlanes, drag between states, right-sheet detail,
- * deep links), but every read and write is the platform workspace: the
- * overlay is the diff, commits are workspace commits, the detail editor is
- * the live rebase-model collab session with redlines.
+ * The tasks board on the WORKSPACE mechanism — the SAME experience as the
+ * Yjs checkout board (chrome, swimlanes, drag, filter/group, commit controls
+ * with message writing, deleted-tasks strip, tag editing, deep links), but
+ * every read and write is the platform workspace: the overlay is the diff,
+ * commits are workspace commits, and the detail editor is the live
+ * rebase-model collab session with redlines.
  *   /w/<checkoutId>?repo=/repos/config&task=<path>&q=<filter>&group=none
  */
 export const Route = createFileRoute("/w/$checkoutId")({
   validateSearch: (search: Record<string, unknown>) => ({
-    group: search.group === "none" ? ("none" as const) : ("folder" as const),
+    group:
+      search.group === "none" || search.group === "label"
+        ? (search.group as "none" | "label")
+        : ("folder" as const),
     q: typeof search.q === "string" ? search.q : "",
     repo: typeof search.repo === "string" ? search.repo : DEFAULT_REPO_PATH,
     task: typeof search.task === "string" ? search.task : "",
@@ -35,49 +53,78 @@ function WorkspaceBoardPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const repoPath = normalizeRepoPath(search.repo) ?? DEFAULT_REPO_PATH;
   const board = useWorkspaceBoard(checkoutId, repoPath);
-  const [committing, setCommitting] = useState(false);
-  const [commitMessage, setCommitMessage] = useState("");
+  const [autoCommit, setAutoCommit] = useState(true);
+  const [commitPending, setCommitPending] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
 
   const patchSearch = useCallback(
     (patch: Partial<typeof search>) =>
       void navigate({ replace: true, search: (current) => ({ ...current, ...patch }) }),
     [navigate],
   );
+  const rowField: RowField =
+    search.group === "none" ? null : search.group === "label" ? "label" : "folder";
 
   const projection = useMemo(
-    () =>
-      projectBoard({
-        filter: search.q,
-        rowField: search.group === "folder" ? "folder" : null,
-        tasks: board.tasks,
-      }),
-    [board.tasks, search.q, search.group],
+    () => projectBoard({ filter: search.q, rowField, tasks: board.tasks }),
+    [board.tasks, search.q, rowField],
   );
-
   const columns = useMemo(
     () => columnsForTasks(board.tasks).map((column) => column.state),
+    [board.tasks],
+  );
+  const allTags = useMemo(
+    () =>
+      [...new Set(board.tasks.flatMap((task) => task.labels))].sort((a, b) => a.localeCompare(b)),
     [board.tasks],
   );
   const openTask = useMemo(
     () => board.tasks.find((task) => task.path === search.task) ?? null,
     [board.tasks, search.task],
   );
-  const dirtyCount = board.changes.size;
+  const deletedChanges = useMemo(
+    () => board.taskChanges.filter((change) => change.status === "deleted"),
+    [board.taskChanges],
+  );
+
+  const commit = useTaskCommit({
+    // The workspace lane summarizes deterministically; the AI one-liner is a
+    // checkout-DO capability this lane can adopt later.
+    api: {
+      generateCommitMessage: async ({ changes }) => fallbackCommitMessage(changes),
+    },
+    enabled: autoCommit,
+    onCommit: async (message) => {
+      setCommitError(null);
+      setCommitPending(true);
+      try {
+        return await board.commit(message?.trim() || fallbackCommitMessage(board.taskChanges));
+      } catch (cause) {
+        setCommitError(cause instanceof Error ? cause.message : String(cause));
+        throw cause;
+      } finally {
+        setCommitPending(false);
+      }
+    },
+    taskChangeSignature: board.taskChanges
+      .map((change) => `${change.status}:${change.path}`)
+      .join("|"),
+    taskChanges: board.taskChanges,
+  });
 
   const moveTask = useCallback(
-    (task: BoardTask, state: string, folder: string) => {
-      const restated =
+    (task: BoardTask, state: string, folder: string, labels?: string[]) => {
+      let source =
         taskColumnState(task.state) === state ? task.source : setTaskCardState(task.source, state);
+      if (labels !== undefined) source = setTaskCardLabels(source, labels);
       if (folder === task.folder) {
-        board.writeTask(task.path, restated);
+        board.writeTask(task.path, source);
         return;
       }
-      // A folder move is a rename: same content lands at the new path, the
-      // old file is deleted — both through the ordinary workspace writes.
       const name = task.path.split("/").at(-1)!;
       const prefix = task.path.slice(0, task.path.indexOf("tasks/") + "tasks/".length);
       const nextPath = folder === "/" ? `${prefix}${name}` : `${prefix}${folder}/${name}`;
-      board.writeTask(nextPath, restated);
+      board.writeTask(nextPath, source);
       board.deleteTask(task.path);
       if (search.task === task.path) patchSearch({ task: nextPath });
     },
@@ -87,91 +134,100 @@ function WorkspaceBoardPage() {
   const addTask = useCallback(
     (state: string, folder: string | null) => {
       const file = newTaskFile({ state, title: "New task" });
-      const target =
-        folder === null || folder === "/"
-          ? `tasks/${file.path.split("/").at(-1)!}`
-          : `tasks/${folder}/${file.path.split("/").at(-1)!}`;
+      const name = file.path.split("/").at(-1)!;
+      const target = folder === null || folder === "/" ? `tasks/${name}` : `tasks/${folder}/${name}`;
       board.writeTask(target, file.content);
       patchSearch({ task: target });
     },
     [board, patchSearch],
   );
 
-  const makeCommit = useCallback(async () => {
-    setCommitting(true);
-    try {
-      await board.commit(commitMessage.trim() || `Update ${dirtyCount} task file(s)`);
-      setCommitMessage("");
-    } finally {
-      setCommitting(false);
-    }
-  }, [board, commitMessage, dirtyCount]);
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <span className="font-mono text-sm text-muted-foreground">
-          {repoPath} <span className="text-foreground">›</span>{" "}
-          <span className="font-semibold text-foreground">{checkoutId}</span>{" "}
-          <span className="text-xs">(workspace)</span>
-        </span>
-        <div className="ml-auto flex items-center gap-1.5">
-          <div className="relative hidden sm:block">
-            <ListFilterIcon className="pointer-events-none absolute top-2 left-2 size-4 text-muted-foreground" />
-            <Input
-              value={search.q}
-              onChange={(event) => patchSearch({ q: event.target.value })}
-              placeholder="Filter"
-              className="h-8 w-44 pl-7"
+    <>
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
+        <SidebarTrigger className="-ml-1" />
+        <CheckoutBreadcrumbs repoPath={repoPath} checkoutId={checkoutId} />
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          <div className="hidden items-center gap-1.5 sm:flex">
+            <ShareButton />
+            <FilterControl value={search.q} onChange={(q) => patchSearch({ q })} />
+            <GroupControl
+              value={rowField}
+              onChange={(next) =>
+                patchSearch({
+                  group: next === null ? "none" : next === "label" ? "label" : "folder",
+                })
+              }
             />
           </div>
-          <Button
-            variant={search.group === "folder" ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => patchSearch({ group: search.group === "folder" ? "none" : "folder" })}
-          >
-            <Rows3Icon className="size-4" /> Group
-          </Button>
-          <Input
-            value={commitMessage}
-            onChange={(event) => setCommitMessage(event.target.value)}
-            placeholder={dirtyCount === 0 ? "Nothing to commit" : `Commit ${dirtyCount} change(s)…`}
-            className="h-8 w-52"
-            disabled={dirtyCount === 0}
+          <div className="sm:hidden">
+            <MobileOverflow
+              filter={search.q}
+              onChangeFilter={(q) => patchSearch({ q })}
+              group={rowField}
+              onChangeGroup={(next) =>
+                patchSearch({
+                  group: next === null ? "none" : next === "label" ? "label" : "folder",
+                })
+              }
+            />
+          </div>
+          <CommitControls
+            taskChanges={board.taskChanges}
+            commitMessage={commit.commitMessage}
+            onCommitMessageChange={commit.setCommitMessage}
+            commitPending={commitPending}
+            generatingMessage={commit.generatingMessage}
+            autoSaveDueAt={commit.autoSaveDueAt}
+            autoCommit={autoCommit}
+            onAutoCommitChange={setAutoCommit}
+            canCommit={true}
+            onMakeCommit={commit.makeCommit}
+            onWriteCommitMessage={commit.writeCommitMessage}
+            onDiscardAll={board.discardAll}
           />
-          <Button size="sm" disabled={dirtyCount === 0 || committing} onClick={() => void makeCommit()}>
-            <GitCommitVerticalIcon className="size-4" />
-            {committing ? "Committing…" : "Commit"}
-          </Button>
         </div>
       </header>
       {board.error !== null && (
-        <p className="border-b bg-destructive/10 px-3 py-1 text-xs text-red-700">{board.error}</p>
+        <p className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-800">{board.error}</p>
       )}
-      <div className="min-h-0 flex-1 overflow-auto">
-        {!board.ready ? (
-          <p className="p-6 text-sm text-muted-foreground">Loading workspace…</p>
-        ) : (
-          <Board
-            projection={projection}
-            taskChangeByPath={board.changes}
-            presenceByPath={new Map()}
-            recentByPath={new Map()}
-            onMove={moveTask}
-            onAdd={addTask}
-            onOpen={(path) => patchSearch({ task: path })}
-          />
-        )}
-      </div>
+      {commitError !== null && (
+        <p className="border-b bg-destructive/10 px-3 py-1 text-xs text-red-700">
+          commit failed: {commitError}
+        </p>
+      )}
+      <DeletedTasksStrip deletedChanges={deletedChanges} onRestore={board.revertTask} />
+      {!board.ready ? (
+        <p className="p-6 text-sm text-muted-foreground">Loading workspace…</p>
+      ) : (
+        <Board
+          projection={projection}
+          taskChangeByPath={board.changes}
+          presenceByPath={new Map()}
+          recentByPath={new Map()}
+          onMove={moveTask}
+          onAdd={addTask}
+          onOpen={(path) => patchSearch({ task: path })}
+        />
+      )}
       <WorkspaceTaskSheet
         task={openTask}
         checkoutId={checkoutId}
         repoPath={repoPath}
         columns={columns}
+        allTags={allTags}
         changeStatus={openTask === null ? undefined : board.changes.get(openTask.path)}
         onLiveContent={board.reflectLiveContent}
         onChangeState={(state) => {
-          if (openTask !== null) board.writeTask(openTask.path, setTaskCardState(openTask.source, state));
+          if (openTask !== null)
+            board.writeTask(openTask.path, setTaskCardState(openTask.source, state));
+        }}
+        onChangeLabels={(labels) => {
+          if (openTask !== null)
+            board.writeTask(openTask.path, setTaskCardLabels(openTask.source, labels));
+        }}
+        onRevert={() => {
+          if (openTask !== null) board.revertTask(openTask.path);
         }}
         onDelete={() => {
           if (openTask !== null) {
@@ -181,6 +237,6 @@ function WorkspaceBoardPage() {
         }}
         onClose={() => patchSearch({ task: "" })}
       />
-    </div>
+    </>
   );
 }
