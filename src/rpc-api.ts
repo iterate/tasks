@@ -11,6 +11,7 @@ import type {
   TasksApi,
   TasksCheckout,
   TasksProject,
+  TasksUser,
 } from "./lib/tasks-api.ts";
 import { DEFAULT_REPO_PATH, isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
@@ -109,6 +110,20 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
 
   async projectId(): Promise<string> {
     return this.#projectId;
+  }
+
+  async whoami(): Promise<TasksUser> {
+    if (this.#credential.type !== "project-app-session") {
+      return { userId: null, email: null, name: null };
+    }
+    // The claims are trustworthy here: authenticate() already proved this
+    // exact token by using it against the platform.
+    const claims = tokenClaims(this.#credential.token);
+    return {
+      userId: typeof claims.userId === "string" ? claims.userId : null,
+      email: typeof claims.email === "string" ? claims.email : null,
+      name: typeof claims.name === "string" ? claims.name : null,
+    };
   }
 
   async repos(): Promise<string[]> {
@@ -226,21 +241,27 @@ export class TasksCheckoutApi extends RpcTarget implements TasksCheckout {
  * before atob because workerd's atob is strict.
  */
 function projectIdClaim(token: string): string {
+  const claims = tokenClaims(token);
+  if (typeof claims.projectId === "string" && claims.projectId !== "") {
+    return claims.projectId;
+  }
+  throw new Error("session token is not a project-app-session JWT");
+}
+
+function tokenClaims(token: string): Record<string, unknown> {
   const parts = token.split(".");
   if (parts.length === 3) {
     const body = parts[1]!.replace(/-/g, "+").replace(/_/g, "/");
     try {
-      const claims = JSON.parse(atob(body + "=".repeat((4 - (body.length % 4)) % 4))) as {
-        projectId?: unknown;
-      };
-      if (typeof claims.projectId === "string" && claims.projectId !== "") {
-        return claims.projectId;
+      const claims: unknown = JSON.parse(atob(body + "=".repeat((4 - (body.length % 4)) % 4)));
+      if (typeof claims === "object" && claims !== null) {
+        return claims as Record<string, unknown>;
       }
     } catch {
-      // fall through to the error below
+      // malformed payload — fall through to the empty record
     }
   }
-  throw new Error("session token is not a project-app-session JWT");
+  return {};
 }
 
 function errorText(error: unknown): string {

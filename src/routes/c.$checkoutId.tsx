@@ -1,5 +1,5 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
 import { CheckIcon, LinkIcon, SearchIcon, Settings2Icon } from "lucide-react";
@@ -14,12 +14,15 @@ import {
   normalizeRepoPath,
 } from "../lib/checkout-shared.ts";
 import {
+  applyVerifiedIdentity,
   commitCheckoutOp,
   generateCheckoutMessageOp,
   localCollabUser,
   renameCollabUser,
   useCheckout,
+  whoami,
 } from "../lib/use-checkout.ts";
+import type { TasksUser } from "../lib/tasks-api.ts";
 import { useTaskCommit, type CommitMessageApi } from "../lib/use-task-commit.ts";
 import type { TaskChangeSummary } from "../state.ts";
 import {
@@ -52,17 +55,36 @@ import {
 import { SidebarTrigger } from "../ui/sidebar.tsx";
 import { Skeleton } from "../ui/skeleton.tsx";
 
+/**
+ * Every piece of view state rides in the URL so any view is deep-linkable:
+ * `repoPath` (omitted for the default repo), `task` (the open task sheet),
+ * `q` (the board filter), `group=none` (grouping off; folder grouping is
+ * the default and stays out of the URL).
+ */
+type CheckoutSearch = { repoPath?: string; task?: string; q?: string; group?: "none" };
+
 export const Route = createFileRoute("/c/$checkoutId")({
-  validateSearch: (search: Record<string, unknown>): { repoPath?: string } => {
+  validateSearch: (search: Record<string, unknown>): CheckoutSearch => {
     const repoPath = normalizeRepoPath(
       typeof search.repoPath === "string" ? search.repoPath : null,
     );
-    return repoPath === null || repoPath === DEFAULT_REPO_PATH ? {} : { repoPath };
+    const validated: CheckoutSearch =
+      repoPath === null || repoPath === DEFAULT_REPO_PATH ? {} : { repoPath };
+    if (typeof search.task === "string" && search.task !== "") validated.task = search.task;
+    if (typeof search.q === "string" && search.q !== "") validated.q = search.q;
+    if (search.group === "none") validated.group = "none";
+    return validated;
   },
   component: CheckoutPage,
 });
 
-type Peer = { id: number; user: PresenceUser; openPath: string | null };
+type Peer = {
+  id: number;
+  user: PresenceUser;
+  email?: string;
+  userId?: string;
+  openPath: string | null;
+};
 
 /**
  * The collaborative board page. Everything above the board lives in ONE
@@ -77,6 +99,27 @@ function CheckoutPage() {
     checkoutId,
     repoPath,
   );
+
+  // The platform-verified identity: fetched once per page, overlaid on our
+  // presence (real name, userId/email in awareness) as soon as both the
+  // identity and the provider exist.
+  const [me, setMe] = useState<TasksUser | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    whoami()
+      .then((user) => {
+        if (!cancelled) setMe(user);
+      })
+      .catch(() => {
+        // identity is progressive enhancement — the animal name stands in
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  useEffect(() => {
+    if (provider !== null && me !== null) applyVerifiedIdentity(provider, me);
+  }, [provider, me]);
 
   const snapshot = useMemo(() => {
     if (doc === null) return null;
@@ -102,10 +145,16 @@ function CheckoutPage() {
     const listed: Peer[] = [];
     for (const [id, state] of provider.awareness.getStates()) {
       if (id === doc.clientID) continue;
-      const user = (state as { user?: PresenceUser }).user;
+      const user = (state as { user?: PresenceUser & { email?: string; userId?: string } }).user;
       if (!user || typeof user.name !== "string") continue;
       const openPath = (state as { openPath?: string | null }).openPath ?? null;
-      listed.push({ id, user: { name: user.name, color: user.color }, openPath });
+      listed.push({
+        id,
+        user: { name: user.name, color: user.color },
+        email: typeof user.email === "string" ? user.email : undefined,
+        userId: typeof user.userId === "string" ? user.userId : undefined,
+        openPath,
+      });
     }
     return listed;
   }, [provider, doc, awarenessVersion]);
@@ -122,6 +171,7 @@ function CheckoutPage() {
           doc={doc}
           snapshot={snapshot!}
           peers={peers}
+          me={me}
           disconnected={status === "disconnected"}
         />
       ) : (
@@ -152,6 +202,7 @@ function ReadyCheckout({
   doc,
   snapshot,
   peers,
+  me,
   disconnected,
 }: {
   checkoutId: string;
@@ -166,12 +217,30 @@ function ReadyCheckout({
     taskChanges: TaskChangeSummary[];
   };
   peers: Peer[];
+  me: TasksUser | null;
   disconnected: boolean;
 }) {
   const { files, base, baseCommit, tasks, taskChanges } = snapshot;
-  const [filter, setFilter] = useState("");
-  const [rowField, setRowField] = useState<"folder" | null>("folder");
-  const [openPath, setOpenPath] = useState<string | null>(null);
+  // View state lives in the URL (deep-linkable): q = filter, group = row
+  // grouping, task = the open sheet. Filter/grouping replace history
+  // entries; opening a task pushes one, so Back closes the sheet.
+  const search = Route.useSearch();
+  const navigate = useNavigate({ from: Route.fullPath });
+  const filter = search.q ?? "";
+  const rowField: "folder" | null = search.group === "none" ? null : "folder";
+  const openPath = search.task ?? null;
+  const setFilter = (value: string) =>
+    void navigate({
+      search: (prev) => ({ ...prev, q: value === "" ? undefined : value }),
+      replace: true,
+    });
+  const setRowField = (value: "folder" | null) =>
+    void navigate({
+      search: (prev) => ({ ...prev, group: value === null ? "none" : undefined }),
+      replace: true,
+    });
+  const setOpenPath = (path: string | null) =>
+    void navigate({ search: (prev) => ({ ...prev, task: path ?? undefined }) });
 
   const filteredTasks = useMemo(() => {
     const query = filter.trim().toLocaleLowerCase();
@@ -276,7 +345,11 @@ function ReadyCheckout({
   };
   const addTask = (state: string, folder: string | null) => {
     const reserved = new Set([...Object.keys(files), ...Object.keys(base)]);
-    let file = newTaskFile({ title: "New task", state });
+    let file = newTaskFile({
+      title: "New task",
+      state,
+      author: me?.email ?? me?.userId ?? undefined,
+    });
     for (let suffix = 2; reserved.has(inFolder(file.path, folder)); suffix++) {
       file = { ...file, path: taskPathForTitle("New task", `${suffix}`) };
     }
@@ -330,7 +403,7 @@ function ReadyCheckout({
           {baseCommit ? <> · {baseCommit.slice(0, 7)}</> : null}
         </span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <PresenceStrip provider={provider} peers={peers} />
+          <PresenceStrip provider={provider} peers={peers} me={me} />
           <ShareLink />
           <Select
             items={[
@@ -368,12 +441,12 @@ function ReadyCheckout({
         </div>
       </div>
       {disconnected ? (
-        <p className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-300">
+        <p className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-800">
           disconnected — reconnecting… (edits keep working and sync when back)
         </p>
       ) : null}
       {commitError ? (
-        <p className="border-b bg-destructive/10 px-3 py-1 text-xs text-red-300">
+        <p className="border-b bg-destructive/10 px-3 py-1 text-xs text-red-700">
           commit failed: {commitError}
         </p>
       ) : null}
@@ -413,30 +486,45 @@ function inFolder(path: string, folder: string | null): string {
   return folder === null || folder === "/" ? path : taskPathInFolder(path, folder);
 }
 
-/** You + everyone else in the checkout. Click your own chip to rename. */
-function PresenceStrip({ provider, peers }: { provider: YProvider; peers: Peer[] }) {
+/**
+ * You + everyone else in the checkout. Chips show the verified identity
+ * when the platform provided one — hover for email, userId, and what the
+ * person has open (the OS stream-processor presence vocabulary). Click your
+ * own chip to override the display name.
+ */
+function PresenceStrip({
+  provider,
+  peers,
+  me,
+}: {
+  provider: YProvider;
+  peers: Peer[];
+  me: TasksUser | null;
+}) {
   const [self, setSelf] = useState(() =>
     typeof window === "undefined" ? null : localCollabUser(),
   );
   if (self === null) return null;
+  const selfName = me?.name ?? me?.email ?? self.name;
+  const selfTitle = presenceTitle("You — click to rename", me?.email, me?.userId, null);
   return (
     <span className="flex items-center gap-1">
       <button
         type="button"
-        title="You — click to rename"
+        title={selfTitle}
         onClick={() => {
-          const name = window.prompt("Your collaborator name", self.name);
+          const name = window.prompt("Your collaborator name", selfName);
           if (name?.trim()) setSelf(renameCollabUser(provider, name));
         }}
         className="rounded-full border bg-transparent px-2 py-0.5 text-[11px]"
         style={{ color: self.color, borderColor: `${self.color}66` }}
       >
-        {self.name}
+        {selfName}
       </button>
       {peers.map((peer) => (
         <span
           key={peer.id}
-          title={peer.openPath ? `${peer.user.name} — editing ${peer.openPath}` : peer.user.name}
+          title={presenceTitle(peer.user.name, peer.email, peer.userId, peer.openPath)}
           className="rounded-full border px-2 py-0.5 text-[11px]"
           style={{ color: peer.user.color, borderColor: `${peer.user.color}66` }}
         >
@@ -445,6 +533,19 @@ function PresenceStrip({ provider, peers }: { provider: YProvider; peers: Peer[]
       ))}
     </span>
   );
+}
+
+function presenceTitle(
+  name: string,
+  email: string | null | undefined,
+  userId: string | null | undefined,
+  openPath: string | null,
+): string {
+  const lines = [name];
+  if (email) lines.push(email);
+  if (userId) lines.push(userId);
+  if (openPath) lines.push(`editing ${openPath}`);
+  return lines.join("\n");
 }
 
 function ShareLink() {

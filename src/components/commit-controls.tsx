@@ -12,9 +12,9 @@ const STATUS_LETTER: Record<TaskChangeStatus, string> = {
   deleted: "D",
 };
 const STATUS_CLASS: Record<TaskChangeStatus, string> = {
-  added: "text-emerald-400",
-  modified: "text-amber-400",
-  deleted: "text-red-400",
+  added: "text-emerald-600",
+  modified: "text-amber-600",
+  deleted: "text-red-600",
 };
 const STATUS_WORD: Record<TaskChangeStatus, string> = {
   added: "New",
@@ -181,7 +181,7 @@ export function DeletedTasksStrip({
         <span
           key={change.path}
           title={change.path}
-          className="inline-flex items-center gap-1.5 rounded-full border border-red-400/40 bg-red-400/10 py-0.5 pr-1 pl-2.5 text-xs text-red-300"
+          className="inline-flex items-center gap-1.5 rounded-full border border-red-600/30 bg-red-600/10 py-0.5 pr-1 pl-2.5 text-xs text-red-700"
         >
           {change.title}
           <Button

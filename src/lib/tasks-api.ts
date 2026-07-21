@@ -42,8 +42,22 @@ export type CheckoutIndexEntry = {
   lastCommit: string | null;
 };
 
+/**
+ * Who this session is, as far as the platform can prove it. userId comes
+ * from the verified project-app-session claims; email/name appear once the
+ * auth worker mints them into the token (absent claims stay null). The
+ * machine lane (project-secret) has no user at all.
+ */
+export type TasksUser = {
+  userId: string | null;
+  email: string | null;
+  name: string | null;
+};
+
 export interface TasksProject {
   projectId(): Promise<string>;
+  /** The verified identity behind this session's credential. */
+  whoami(): Promise<TasksUser>;
   /** The project's repo catalog — paths a checkout can be opened against. */
   repos(): Promise<string[]>;
   /** Every checkout anyone has opened, newest activity first (the sidebar). */

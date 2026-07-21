@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import YProvider from "y-partyserver/provider";
 import { newWebSocketRpcSession } from "capnweb";
 import type { CommitResult } from "../state.ts";
-import type { CheckoutIndexEntry, TasksApi } from "./tasks-api.ts";
+import type { CheckoutIndexEntry, TasksApi, TasksUser } from "./tasks-api.ts";
 
 export type CheckoutStatus = "connecting" | "connected" | "ready" | "disconnected";
 
@@ -161,19 +161,50 @@ export function listCheckouts(): Promise<CheckoutIndexEntry[]> {
   return withProject((project) => project.checkouts());
 }
 
+/** The platform-verified identity behind this browser's session. */
+export function whoami(): Promise<TasksUser> {
+  return withProject((project) => project.whoami());
+}
+
+/**
+ * Overlay the verified identity on the local presence identity: the color
+ * stays this browser's own, but the display name becomes the real one, and
+ * userId/email ride awareness so peers can show who is who.
+ */
+export function applyVerifiedIdentity(provider: YProvider, user: TasksUser): CollabUser {
+  const current = localCollabUser();
+  const merged: CollabUser = {
+    ...current,
+    name: user.name ?? user.email ?? current.name,
+    userId: user.userId ?? undefined,
+    email: user.email ?? undefined,
+  };
+  provider.awareness.setLocalStateField("user", merged);
+  return merged;
+}
+
 /** The identity this browser collaborates as — persisted locally, renameable. */
-export type CollabUser = { name: string; color: string; colorLight: string };
+export type CollabUser = {
+  name: string;
+  color: string;
+  colorLight: string;
+  /** Platform-verified fields, present once whoami() resolved. */
+  userId?: string;
+  email?: string;
+};
 
 const IDENTITY_KEY = "tasks-collab-identity";
+// Mid-tone palette: readable as text on the light theme, still saturated
+// enough for cursors and presence dots.
 const COLORS = [
-  "#6fbf8f",
-  "#d9a05b",
-  "#8b93e6",
-  "#e08a92",
-  "#5bc0d9",
-  "#c78be6",
-  "#a8c76b",
-  "#e6b35b",
+  "#059669",
+  "#d97706",
+  "#4f46e5",
+  "#dc2626",
+  "#0891b2",
+  "#9333ea",
+  "#65a30d",
+  "#db2777",
 ];
 const ADJECTIVES = ["brisk", "calm", "deft", "keen", "merry", "quick", "sly", "warm"];
 const ANIMALS = ["fox", "heron", "lynx", "otter", "raven", "seal", "stoat", "wren"];
@@ -202,7 +233,9 @@ export function localCollabUser(): CollabUser {
 }
 
 export function renameCollabUser(provider: YProvider, name: string): CollabUser {
-  const current = localCollabUser();
+  const current =
+    ((provider.awareness.getLocalState() as { user?: CollabUser } | null)?.user ??
+      localCollabUser());
   const user = { ...current, name: name.trim() || current.name };
   try {
     window.localStorage.setItem(IDENTITY_KEY, JSON.stringify({ name: user.name, color: user.color }));

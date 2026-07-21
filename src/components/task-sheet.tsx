@@ -59,7 +59,7 @@ export function TaskSheet({
     <Sheet open={task !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <SheetContent
         side="right"
-        className="flex w-full flex-col gap-0 p-0 sm:max-w-[620px]"
+        className="flex w-full flex-col gap-0 p-0 data-[side=right]:sm:w-[62vw] data-[side=right]:sm:max-w-[62vw]"
       >
         {task === null ? null : (
           <>

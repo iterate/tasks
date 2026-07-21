@@ -65,7 +65,7 @@ export function Board({
               key={row.key}
               className={cn("flex min-w-full flex-col", rows.length === 1 && "min-h-full flex-1")}
             >
-              {rowField === null ? null : (
+              {rowField === null || rows.length === 1 ? null : (
                 <header className="sticky left-0 flex h-9 w-fit max-w-[calc(100vw-4rem)] items-center gap-2 px-2 text-sm font-medium">
                   <FolderIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                   <span className="truncate font-mono text-xs">{row.label}</span>
@@ -152,8 +152,8 @@ function BoardCell({
           ))}
         </div>
         <Button
-          variant="ghost"
-          className="mt-1 h-8 w-full justify-start border border-dashed border-transparent text-xs text-muted-foreground hover:border-border"
+          variant="outline"
+          className="mt-2 h-10 w-full border-dashed text-muted-foreground"
           onClick={() => onAdd(state, rowValue)}
         >
           <PlusIcon aria-hidden className="size-3.5" />
@@ -201,8 +201,8 @@ function BoardCard({
         <span
           className={cn(
             "absolute top-2 right-2 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase",
-            changeStatus === "added" && "bg-emerald-500/15 text-emerald-300",
-            changeStatus === "modified" && "bg-amber-500/15 text-amber-300",
+            changeStatus === "added" && "bg-emerald-500/15 text-emerald-700",
+            changeStatus === "modified" && "bg-amber-500/15 text-amber-800",
           )}
         >
           {changeLabel}
@@ -246,11 +246,11 @@ export function TaskStateIcon({ state, className }: { state: string; className?:
   const shared = cn("size-3.5 shrink-0", className);
   switch (state) {
     case "in-progress":
-      return <CircleDotIcon aria-hidden className={cn(shared, "text-amber-400")} />;
+      return <CircleDotIcon aria-hidden className={cn(shared, "text-amber-500")} />;
     case "in-review":
-      return <CircleEllipsisIcon aria-hidden className={cn(shared, "text-sky-400")} />;
+      return <CircleEllipsisIcon aria-hidden className={cn(shared, "text-sky-500")} />;
     case "done":
-      return <CircleCheckIcon aria-hidden className={cn(shared, "text-emerald-400")} />;
+      return <CircleCheckIcon aria-hidden className={cn(shared, "text-emerald-600")} />;
     default:
       return <CircleDashedIcon aria-hidden className={cn(shared, "text-muted-foreground")} />;
   }

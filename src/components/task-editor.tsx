@@ -29,7 +29,7 @@ const editorTheme = EditorView.theme(
       opacity: 1,
     },
   },
-  { dark: true },
+  { dark: false },
 );
 
 /**

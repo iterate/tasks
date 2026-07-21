@@ -52,10 +52,16 @@ export function setTaskCardState(source: string, state: string): string {
 
 /**
  * Project a brand-new task file: slugified filename under `tasks/`,
- * frontmatter with the state, `# Title` heading, then the body. Collision
- * avoidance is the caller's job via `taskPathForTitle(title, suffix)`.
+ * frontmatter with the state (plus `author` when the creator is known),
+ * `# Title` heading, then the body. Collision avoidance is the caller's job
+ * via `taskPathForTitle(title, suffix)`.
  */
-export function newTaskFile(input: { title: string; body?: string; state?: string }): {
+export function newTaskFile(input: {
+  title: string;
+  body?: string;
+  state?: string;
+  author?: string;
+}): {
   path: string;
   content: string;
 } {
@@ -63,6 +69,9 @@ export function newTaskFile(input: { title: string; body?: string; state?: strin
   const state = input.state?.trim() || DEFAULT_TASK_STATE;
   const document = parseDocument("");
   document.set("state", state);
+  if (input.author !== undefined && input.author.trim() !== "") {
+    document.set("author", input.author.trim());
+  }
   const yaml = document.toString().trimEnd();
   const body = input.body?.trim();
   return {

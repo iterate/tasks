@@ -1,12 +1,14 @@
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { FolderGit2Icon, ListTodoIcon, PlusIcon } from "lucide-react";
+import { ChevronsLeftIcon, FolderGit2Icon, PlusIcon } from "lucide-react";
 import { DEFAULT_REPO_PATH, newCheckoutId } from "../lib/checkout-shared.ts";
 import { listCheckouts, listRepos } from "../lib/use-checkout.ts";
 import type { CheckoutIndexEntry } from "../lib/tasks-api.ts";
+import { IterateLogo } from "../ui/iterate-logo.tsx";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupAction,
   SidebarGroupContent,
@@ -16,6 +18,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "../ui/sidebar.tsx";
 
 /**
@@ -23,7 +26,9 @@ import {
  * second. Repos come from the project's catalog; checkouts from the index
  * DO (every checkout anyone ever opened, newest activity first). The
  * currently open checkout is merged in optimistically so a brand-new one
- * appears before the index has heard about it.
+ * appears before the index has heard about it. Composition follows the
+ * apps/os AppSidebar (shadcn sidebar blocks 07/08): logo header, icon
+ * collapse, footer collapse button, rail.
  */
 export function AppSidebar() {
   const navigate = useNavigate();
@@ -91,12 +96,21 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="offcanvas">
-      <SidebarHeader>
-        <Link to="/" className="flex items-center gap-2 px-2 py-1.5">
-          <ListTodoIcon className="size-4 text-muted-foreground" aria-hidden />
-          <span className="text-sm font-semibold tracking-tight">Tasks</span>
-        </Link>
+    <Sidebar collapsible="icon">
+      <SidebarHeader className="transition-[padding] group-data-[collapsible=icon]:pt-3">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" render={<Link to="/" />} tooltip="Tasks home">
+              <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-black">
+                <IterateLogo className="size-6 rounded-sm" />
+              </span>
+              <span className="grid flex-1 text-left text-sm leading-tight">
+                <span className="truncate font-medium">iterate</span>
+                <span className="truncate text-xs text-muted-foreground">tasks</span>
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
         {groups.map(([repoPath, entries]) => (
@@ -105,7 +119,10 @@ export function AppSidebar() {
               <FolderGit2Icon className="size-3.5" aria-hidden />
               <span className="truncate font-mono">{repoLabel(repoPath)}</span>
             </SidebarGroupLabel>
-            <SidebarGroupAction title={`New checkout of ${repoPath}`} onClick={() => openNewCheckout(repoPath)}>
+            <SidebarGroupAction
+              title={`New checkout of ${repoPath}`}
+              onClick={() => openNewCheckout(repoPath)}
+            >
               <PlusIcon aria-hidden />
               <span className="sr-only">New checkout</span>
             </SidebarGroupAction>
@@ -113,7 +130,7 @@ export function AppSidebar() {
               <SidebarMenu>
                 {entries.length === 0 ? (
                   <SidebarMenuItem>
-                    <span className="block px-2 py-1 text-xs text-sidebar-foreground/50">
+                    <span className="block px-2 py-1 text-xs text-sidebar-foreground/50 group-data-[collapsible=icon]:hidden">
                       {loaded ? "no checkouts yet" : "loading…"}
                     </span>
                   </SidebarMenuItem>
@@ -124,6 +141,7 @@ export function AppSidebar() {
                         isActive={
                           entry.checkoutId === activeCheckoutId && repoPath === activeRepoPath
                         }
+                        tooltip={entry.checkoutId}
                         render={
                           <Link
                             to="/c/$checkoutId"
@@ -147,8 +165,32 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
+      <SidebarFooter>
+        <CollapseButton />
+      </SidebarFooter>
       <SidebarRail />
     </Sidebar>
+  );
+}
+
+function CollapseButton() {
+  const { state, toggleSidebar } = useSidebar();
+  const isCollapsed = state === "collapsed";
+  return (
+    <SidebarMenu>
+      <SidebarMenuItem>
+        <SidebarMenuButton
+          type="button"
+          size="sm"
+          className="text-sidebar-foreground/70"
+          tooltip={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          onClick={toggleSidebar}
+        >
+          <ChevronsLeftIcon className={isCollapsed ? "rotate-180" : undefined} />
+          <span>Collapse sidebar</span>
+        </SidebarMenuButton>
+      </SidebarMenuItem>
+    </SidebarMenu>
   );
 }
 
