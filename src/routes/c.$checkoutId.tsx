@@ -42,6 +42,7 @@ import {
   type RowField,
 } from "../lib/board-model.ts";
 import { useRecentTouches, type RecencyState } from "../lib/recency.ts";
+import { projectBoard } from "../lib/board-engine.ts";
 import { Board } from "../components/board.tsx";
 import { TaskSheet } from "../components/task-sheet.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
@@ -260,15 +261,24 @@ function ReadyCheckout({
   const [draftPath, setDraftPath] = useState<string | null>(null);
   const renamedDraftRef = useRef(false);
 
-  const filteredTasks = useMemo(() => {
-    const query = filter.trim().toLocaleLowerCase();
-    if (query === "") return tasks;
-    return tasks.filter((task) =>
-      [task.title, task.summary, task.state, task.folder, task.path, ...task.labels].some(
-        (value) => value.toLocaleLowerCase().includes(query),
-      ),
-    );
-  }, [tasks, filter]);
+  const projection = useMemo(
+    () => projectBoard({ tasks, filter, rowField }),
+    [tasks, filter, rowField],
+  );
+
+  // Auto-commit is a personal preference, remembered locally.
+  const [autoCommit, setAutoCommitState] = useState(
+    () =>
+      typeof window === "undefined" || window.localStorage.getItem("tasks-autocommit") !== "off",
+  );
+  const setAutoCommit = (value: boolean) => {
+    setAutoCommitState(value);
+    try {
+      window.localStorage.setItem("tasks-autocommit", value ? "on" : "off");
+    } catch {
+      // private mode
+    }
+  };
 
   const taskChangeByPath = useMemo(
     () => new Map(taskChanges.map((change) => [change.path, change.status] as const)),
@@ -336,6 +346,7 @@ function ReadyCheckout({
     api,
     taskChanges,
     taskChangeSignature,
+    enabled: autoCommit,
     onCommit: commitCheckout,
   });
 
@@ -459,6 +470,8 @@ function ReadyCheckout({
             commitPending={commitPending}
             generatingMessage={commit.generatingMessage}
             autoSaveDueAt={commit.autoSaveDueAt}
+            autoCommit={autoCommit}
+            onAutoCommitChange={setAutoCommit}
             canCommit={true}
             onMakeCommit={commit.makeCommit}
             onWriteCommitMessage={commit.writeCommitMessage}
@@ -478,8 +491,7 @@ function ReadyCheckout({
       ) : null}
       <DeletedTasksStrip deletedChanges={deletedChanges} onRestore={revertTask} />
       <Board
-        tasks={filteredTasks}
-        rowField={rowField}
+        projection={projection}
         taskChangeByPath={taskChangeByPath}
         presenceByPath={presenceByPath}
         recentByPath={recency.touches}
@@ -495,6 +507,7 @@ function ReadyCheckout({
         columns={columns}
         presence={openTask === null ? [] : (presenceByPath.get(openTask.path) ?? [])}
         changeStatus={openTask === null ? undefined : taskChangeByPath.get(openTask.path)}
+        initialSpans={openTask === null ? undefined : recency.spans.get(openTask.path)}
         focusHeadline={
           openTask !== null && openTask.path === draftPath
             ? renamedDraftRef.current

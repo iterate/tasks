@@ -30,7 +30,9 @@ export function parseTaskCard(path: string, source: string): TaskCard {
     path,
     title: stringValue(metadata.title) ?? firstHeadingTitle(frontmatter.body) ?? fallbackTitle,
     state: normalizeTaskState(stringValue(metadata.state)),
-    labels: uniqueStrings(stringArray(metadata.labels)),
+    // `tags` is the canonical key; `labels` stays readable for apps/os
+    // compatibility and older files.
+    labels: uniqueStrings([...stringArray(metadata.tags), ...stringArray(metadata.labels)]),
     agent: stringValue(metadata.agent) ?? null,
     source,
   };
@@ -51,11 +53,13 @@ export function setTaskCardAgent(source: string, agentPath: string): string {
   });
 }
 
-/** Replace the task's tags (frontmatter `labels`); empty clears the key. */
+/** Replace the task's tags. Writes the canonical `tags` key (migrating any
+ * legacy `labels` key away); empty clears both. */
 export function setTaskCardLabels(source: string, labels: readonly string[]): string {
   return updateFrontmatter(source, (document) => {
-    if (labels.length === 0) document.delete("labels");
-    else document.set("labels", [...labels]);
+    document.delete("labels");
+    if (labels.length === 0) document.delete("tags");
+    else document.set("tags", [...labels]);
   });
 }
 

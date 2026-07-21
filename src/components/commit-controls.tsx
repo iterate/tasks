@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronDownIcon, GitCommitVerticalIcon, SparklesIcon, Undo2Icon } from "lucide-react";
 import type { TaskChangeStatus, TaskChangeSummary } from "../state.ts";
 import { Button } from "../ui/button.tsx";
+import { Checkbox } from "../ui/checkbox.tsx";
 import { Input } from "../ui/input.tsx";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover.tsx";
 import { cn } from "../ui/utils.ts";
@@ -47,6 +48,8 @@ export function CommitControls({
   commitPending,
   generatingMessage,
   autoSaveDueAt,
+  autoCommit,
+  onAutoCommitChange,
   canCommit,
   onMakeCommit,
   onWriteCommitMessage,
@@ -58,6 +61,8 @@ export function CommitControls({
   commitPending: boolean;
   generatingMessage: boolean;
   autoSaveDueAt: number | undefined;
+  autoCommit: boolean;
+  onAutoCommitChange: (value: boolean) => void;
   canCommit: boolean;
   onMakeCommit: () => void;
   onWriteCommitMessage: () => void;
@@ -90,6 +95,13 @@ export function CommitControls({
         </PopoverTrigger>
         <PopoverContent align="end" className="w-96 p-3">
           <div className="flex flex-col gap-2.5">
+            <label className="flex items-center gap-2 text-xs font-medium">
+              <Checkbox
+                checked={autoCommit}
+                onCheckedChange={(checked) => onAutoCommitChange(checked === true)}
+              />
+              Auto-commit after 60s of quiet
+            </label>
             <p className="text-xs text-muted-foreground">
               {taskChanges.length} uncommitted task {taskChanges.length === 1 ? "file" : "files"}.
               An empty message auto-generates one.

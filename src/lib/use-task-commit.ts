@@ -22,11 +22,14 @@ export function useTaskCommit({
   api,
   taskChanges,
   taskChangeSignature,
+  enabled = true,
   onCommit,
 }: {
   api: CommitMessageApi | null;
   taskChanges: readonly TaskChangeSummary[];
   taskChangeSignature: string;
+  /** Auto-commit toggle: false parks the idle timer entirely. */
+  enabled?: boolean;
   /** Pass a typed message, or `undefined` to let the commit path summarize its own snapshot. */
   onCommit: (message: string | undefined) => Promise<unknown>;
 }) {
@@ -39,8 +42,10 @@ export function useTaskCommit({
   // window, an empty set cancels it (including right after a commit clears
   // the committed overlays).
   useEffect(() => {
-    setAutoSaveDueAt(taskChangeSignature === "" ? undefined : Date.now() + TASK_AUTO_SAVE_MS);
-  }, [taskChangeSignature]);
+    setAutoSaveDueAt(
+      !enabled || taskChangeSignature === "" ? undefined : Date.now() + TASK_AUTO_SAVE_MS,
+    );
+  }, [taskChangeSignature, enabled]);
 
   const commitTasks = useCallback(
     async (manualMessage?: string) => {

@@ -6,8 +6,8 @@ import {
   type CollaboratorInfo,
 } from "./checkout-shared.ts";
 
-/** How long a touch glows. Ephemeral by design: "recent" means since THIS
- * viewer received the change — Yjs items carry authors, not timestamps. */
+/** How long a card's touch RING glows. Character-level spans are not
+ * TTL-bound — they persist until a commit resets the base. */
 export const RECENT_TOUCH_TTL_MS = 90_000;
 
 export type RecentTouch = {
@@ -53,18 +53,15 @@ export function useRecentTouches(doc: Y.Doc | null, active: boolean): RecencySta
         timer = setTimeout(prune, Math.max(250, soonest - Date.now() + 50));
       }
     };
+    // Touch rings expire on the TTL; character spans deliberately do NOT —
+    // "what changed and by whom" persists until a commit resets the base.
     const prune = () => {
       setState((previous) => {
         const now = Date.now();
         const touches = new Map(
           [...previous.touches].filter(([, touch]) => now - touch.at < RECENT_TOUCH_TTL_MS),
         );
-        const spans = new Map<string, RecentSpan[]>();
-        for (const [path, list] of previous.spans) {
-          const kept = list.filter((span) => now - span.at < RECENT_TOUCH_TTL_MS);
-          if (kept.length > 0) spans.set(path, kept);
-        }
-        const next = { touches, spans };
+        const next = { touches, spans: previous.spans };
         schedule(next);
         return next;
       });
@@ -122,9 +119,22 @@ export function useRecentTouches(doc: Y.Doc | null, active: boolean): RecencySta
       });
     };
 
+    // A commit rewrites the base: the attribution served its purpose, so
+    // every retained span clears with it.
+    const meta = doc.getMap("meta");
+    let lastBaseCommit = meta.get("baseCommit");
+    const metaObserver = () => {
+      const baseCommit = meta.get("baseCommit");
+      if (baseCommit === lastBaseCommit) return;
+      lastBaseCommit = baseCommit;
+      setState((previous) => ({ touches: previous.touches, spans: new Map() }));
+    };
+    meta.observe(metaObserver);
+
     files.observeDeep(observer);
     return () => {
       files.unobserveDeep(observer);
+      meta.unobserve(metaObserver);
       if (timer !== null) clearTimeout(timer);
     };
   }, [doc, active]);

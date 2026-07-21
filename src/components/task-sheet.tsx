@@ -5,6 +5,7 @@ import { BotIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { projectSlug } from "./checkout-header.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
+import type { RecentSpan } from "../lib/recency.ts";
 import { TaskStateIcon } from "./board.tsx";
 
 // CodeMirror (plus the Yjs binding) is by far the heaviest thing this app
@@ -47,6 +48,7 @@ export function TaskSheet({
   presence,
   changeStatus,
   focusHeadline,
+  initialSpans,
   onChangeState,
   onAssignAgent,
   onRevert,
@@ -60,6 +62,7 @@ export function TaskSheet({
   presence: PresenceUser[];
   changeStatus: TaskChangeStatus | undefined;
   focusHeadline?: "select" | "end";
+  initialSpans?: RecentSpan[];
   onChangeState: (state: string) => void;
   onAssignAgent: () => Promise<void>;
   onRevert: () => void;
@@ -205,6 +208,7 @@ export function TaskSheet({
                     text={text}
                     awareness={awareness}
                     focusHeadline={focusHeadline}
+                    initialSpans={initialSpans}
                     onSubmit={onClose}
                   />
                 </Suspense>

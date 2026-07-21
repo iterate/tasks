@@ -14,13 +14,9 @@ import { Badge } from "../ui/badge.tsx";
 import { Button } from "../ui/button.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 import type { TaskChangeStatus } from "../state.ts";
-import { columnsForTasks, taskColumnState } from "../tasks-model.ts";
-import {
-  stateLabel,
-  type BoardTask,
-  type PresenceUser,
-  type RowField,
-} from "../lib/board-model.ts";
+import { taskColumnState } from "../tasks-model.ts";
+import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
+import type { BoardColumn, BoardProjection } from "../lib/board-engine.ts";
 import { agoText, type RecentSpan, type RecentTouch } from "../lib/recency.ts";
 
 /**
@@ -30,8 +26,7 @@ import { agoText, type RecentSpan, type RecentTouch } from "../lib/recency.ts";
  * modified) and the presence dots of collaborators editing them.
  */
 export function Board({
-  tasks,
-  rowField,
+  projection,
   taskChangeByPath,
   presenceByPath,
   recentByPath,
@@ -40,8 +35,7 @@ export function Board({
   onAdd,
   onOpen,
 }: {
-  tasks: BoardTask[];
-  rowField: RowField;
+  projection: BoardProjection;
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
@@ -50,9 +44,14 @@ export function Board({
   onAdd: (state: string, folder: string | null) => void;
   onOpen: (path: string) => void;
 }) {
-  const columns = useMemo(() => columnsForTasks(tasks).map((column) => column.state), [tasks]);
-  const rows = useMemo(() => rowGroups(tasks, rowField), [tasks, rowField]);
-  const byPath = useMemo(() => new Map(tasks.map((task) => [task.path, task])), [tasks]);
+  const { rowField, rows, columns, filterActive } = projection;
+  const byPath = useMemo(() => {
+    const map = new Map<string, BoardTask>();
+    for (const row of rows) {
+      for (const cell of row.cells) for (const task of cell.tasks) map.set(task.path, task);
+    }
+    return map;
+  }, [rows]);
 
   return (
     <DragDropProvider
@@ -100,20 +99,20 @@ export function Board({
                   <span className={cn("truncate text-xs", rowField === "folder" && "font-mono")}>
                     {row.label}
                   </span>
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {row.tasks.length}
-                  </span>
+                  <span className="text-xs tabular-nums text-muted-foreground">{row.count}</span>
                 </header>
               )}
               <div className="flex min-h-0 min-w-full flex-1 gap-2">
-                {columns.map((state) => (
+                {row.cells.map((cell, cellIndex) => (
                   <BoardCell
-                    key={state}
-                    state={state}
+                    key={cell.state}
+                    state={cell.state}
                     rowKey={row.key}
                     rowValue={row.value}
                     showHeader={rowIndex === 0}
-                    tasks={row.tasks.filter((task) => taskColumnState(task.state) === state)}
+                    column={columns[cellIndex]!}
+                    filterActive={filterActive}
+                    tasks={cell.tasks}
                     taskChangeByPath={taskChangeByPath}
                     presenceByPath={presenceByPath}
                     recentByPath={recentByPath}
@@ -136,6 +135,8 @@ function BoardCell({
   rowKey,
   rowValue,
   showHeader,
+  column,
+  filterActive,
   tasks,
   taskChangeByPath,
   presenceByPath,
@@ -148,6 +149,8 @@ function BoardCell({
   rowKey: string;
   rowValue: string | null;
   showHeader: boolean;
+  column: BoardColumn;
+  filterActive: boolean;
   tasks: BoardTask[];
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
@@ -173,7 +176,7 @@ function BoardCell({
           <TaskStateIcon state={state} />
           <h2 className="truncate text-sm font-medium">{stateLabel(state)}</h2>
           <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-            {tasks.length}
+            {filterActive ? `${column.visible}/${column.total}` : column.total}
           </span>
         </header>
       ) : null}
@@ -359,56 +362,6 @@ export function TaskStateIcon({ state, className }: { state: string; className?:
   }
 }
 
-function rowGroups(
-  tasks: BoardTask[],
-  rowField: RowField,
-): Array<{ key: string; label: string | null; value: string | null; tasks: BoardTask[] }> {
-  if (rowField === null) return [{ key: "all", label: null, value: null, tasks }];
-  const groups = new Map<string, BoardTask[]>();
-  if (rowField === "folder") {
-    for (const task of tasks) {
-      const group = groups.get(task.folder) ?? [];
-      group.push(task);
-      groups.set(task.folder, group);
-    }
-    if (groups.size === 0) groups.set("/", []);
-    return [...groups]
-      .sort(([left], [right]) => {
-        if (left === "/") return -1;
-        if (right === "/") return 1;
-        return left.localeCompare(right);
-      })
-      .map(([folder, grouped]) => ({
-        key: `folder:${folder}`,
-        label: folder,
-        value: folder,
-        tasks: grouped,
-      }));
-  }
-  // Tags: a task appears in every tag's row; untagged tasks share one
-  // trailing "No tag" row. The tag set is just whatever exists in the data.
-  for (const task of tasks) {
-    const labels = task.labels.length === 0 ? [""] : task.labels;
-    for (const label of labels) {
-      const group = groups.get(label) ?? [];
-      group.push(task);
-      groups.set(label, group);
-    }
-  }
-  if (groups.size === 0) groups.set("", []);
-  return [...groups]
-    .sort(([left], [right]) => {
-      if (left === "") return 1;
-      if (right === "") return -1;
-      return left.localeCompare(right);
-    })
-    .map(([label, grouped]) => ({
-      key: `label:${label}`,
-      label: label === "" ? "No tag" : label,
-      value: label === "" ? null : label,
-      tasks: grouped,
-    }));
-}
 
 function parseCardId(id: string): { path: string; rowKey: string } | null {
   const match = /^card:([^:]+):(.+)$/.exec(id);

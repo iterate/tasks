@@ -12,7 +12,7 @@ import {
 } from "@codemirror/view";
 import { defaultKeymap } from "@codemirror/commands";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
-import { agoText, RECENT_TOUCH_TTL_MS, transactionAuthor } from "../lib/recency.ts";
+import { agoText, transactionAuthor, type RecentSpan } from "../lib/recency.ts";
 
 const editorTheme = EditorView.theme(
   {
@@ -164,6 +164,7 @@ export function TaskEditor({
   text,
   awareness,
   focusHeadline,
+  initialSpans,
   onSubmit,
 }: {
   path: string;
@@ -172,12 +173,17 @@ export function TaskEditor({
   /** Place the caret on the first `# heading` after mount: "select" covers
    * the heading text (typing replaces it), "end" parks after it. */
   focusHeadline?: "select" | "end";
+  /** Uncommitted attribution recorded before this mount — re-painted so
+   * closing and reopening the sheet keeps who-wrote-what visible. */
+  initialSpans?: RecentSpan[];
   /** ⌘↩ — "I'm done here" (the sheet closes itself). */
   onSubmit?: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const onSubmitRef = useRef(onSubmit);
   onSubmitRef.current = onSubmit;
+  const initialSpansRef = useRef(initialSpans);
+  initialSpansRef.current = initialSpans;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -226,11 +232,31 @@ export function TaskEditor({
       view.focus();
     }
 
+    // Re-paint the attribution recorded before this mount, so open/close
+    // cycles keep who-wrote-what visible until commit clears it.
+    let glowId = 0;
+    {
+      const seeds = (initialSpansRef.current ?? []).filter(
+        (span) => span.to > span.from && span.from < view.state.doc.length,
+      );
+      if (seeds.length > 0) {
+        view.dispatch({
+          effects: seeds.map((span) =>
+            addGlow.of({
+              kind: "insert",
+              from: span.from,
+              to: Math.min(span.to, view.state.doc.length),
+              color: span.author.color,
+              meta: { id: ++glowId, name: span.author.name, at: span.at, deleted: false },
+            }),
+          ),
+        });
+      }
+    }
+
     // yCollab's own Y observer registered first (at view creation), so by
     // the time this observer runs the CM doc already reflects the event and
     // the delta's indices are valid CM positions.
-    let glowId = 0;
-    const timers = new Set<ReturnType<typeof setTimeout>>();
     const observer = (event: Y.YTextEvent, transaction: Y.Transaction) => {
       const doc = text.doc;
       if (doc === null) return;
@@ -249,13 +275,6 @@ export function TaskEditor({
         .join("");
 
       const effects: Array<StateEffect<GlowSpec | number>> = [];
-      const expire = (id: number) => {
-        const timer = setTimeout(() => {
-          timers.delete(timer);
-          view.dispatch({ effects: clearGlow.of(id) });
-        }, RECENT_TOUCH_TTL_MS);
-        timers.add(timer);
-      };
       let index = 0;
       for (const op of event.delta) {
         if (typeof op.retain === "number") index += op.retain;
@@ -270,7 +289,6 @@ export function TaskEditor({
               meta: { id, name: author.name, at: Date.now(), deleted: false },
             }),
           );
-          expire(id);
           index += op.insert.length;
         } else if (typeof op.delete === "number") {
           const deletedText = deletedPool.slice(0, op.delete);
@@ -285,7 +303,6 @@ export function TaskEditor({
               meta: { id, name: author.name, at: Date.now(), deleted: true },
             }),
           );
-          expire(id);
         }
       }
       // Deferred: for LOCAL typing this observer fires inside CodeMirror's
@@ -296,7 +313,6 @@ export function TaskEditor({
 
     return () => {
       text.unobserve(observer);
-      for (const timer of timers) clearTimeout(timer);
       view.destroy();
       undoManager.destroy();
     };
