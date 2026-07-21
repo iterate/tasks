@@ -114,7 +114,11 @@ export function redlineExtension(connection: CollabConnection) {
             this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
             return;
           }
-          this.decorations = decorate(changes.segments, this.view.state.doc.length);
+          const segments: CollabChangeSegment[] = [
+            ...changes.inserted.map((span) => ({ ...span, kind: "inserted" as const })),
+            ...changes.deleted.map((span) => ({ ...span, kind: "deleted" as const })),
+          ];
+          this.decorations = decorate(segments, this.view.state.doc.length);
           // Nudge a measure/paint without touching the doc.
           this.view.dispatch({});
         } catch {

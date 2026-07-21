@@ -94,11 +94,14 @@ export type CollabChangeSegment =
   | { clientId: string; from: number; kind: "inserted"; to: number }
   | { at: number; clientId: string; kind: "deleted"; text: string };
 
+/** Two plain arrays on the wire (a union array breaks the platform's
+ * generated capnweb types); consumers re-interleave by position. */
 export type CollabChanges = {
   baseContent: string;
   baseVersion: number;
+  deleted: { at: number; clientId: string; text: string }[];
   headVersion: number;
-  segments: CollabChangeSegment[];
+  inserted: { clientId: string; from: number; to: number }[];
 };
 
 export interface TasksWorkspace {
