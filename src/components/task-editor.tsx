@@ -193,7 +193,6 @@ export function TaskEditor({
     let glowId = 0;
     const timers = new Set<ReturnType<typeof setTimeout>>();
     const observer = (event: Y.YTextEvent, transaction: Y.Transaction) => {
-      if (transaction.local) return;
       const doc = text.doc;
       if (doc === null) return;
       const author = transactionAuthor(doc, transaction);
@@ -223,7 +222,9 @@ export function TaskEditor({
           index += op.insert.length;
         }
       }
-      if (effects.length > 0) view.dispatch({ effects });
+      // Deferred: for LOCAL typing this observer fires inside CodeMirror's
+      // own dispatch cycle, where a nested dispatch would throw.
+      if (effects.length > 0) queueMicrotask(() => view.dispatch({ effects }));
     };
     text.observe(observer);
 

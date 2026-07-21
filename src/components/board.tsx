@@ -193,33 +193,32 @@ function BoardCard({
     id: `card:${encodeURIComponent(task.path)}:${encodeURIComponent(rowKey)}`,
     type: "task",
   });
+  const changeWord =
+    changeStatus === "added" ? "New" : changeStatus === "modified" ? "Edited" : undefined;
+  const hoverLines = [
+    changeWord,
+    touch ? `${touch.author.name} ${touch.action} this · ${agoText(touch.at)}` : undefined,
+  ].filter((line): line is string => line !== undefined);
   return (
     <button
       type="button"
       ref={ref}
       onClick={() => onOpen(task.path)}
-      title={touch ? `${touch.author.name} ${touch.action} this · ${agoText(touch.at)}` : undefined}
+      title={hoverLines.length > 0 ? hoverLines.join("\n") : undefined}
       style={
         touch
-          ? {
-              boxShadow: `0 0 0 1.5px ${touch.author.color}, 0 0 12px 1px ${touch.author.color}55`,
-            }
+          ? { boxShadow: `0 0 0 1px ${touch.author.color}, 0 0 8px 0 ${touch.author.color}40` }
           : undefined
       }
       className={cn(
         "relative w-full cursor-grab rounded-md border border-border/70 bg-card p-2.5 text-left transition-[background-color,border-color,box-shadow,opacity] hover:bg-accent/40 active:cursor-grabbing",
+        changeStatus === "added" &&
+          "border-emerald-500/60 shadow-[inset_0_0_10px_-4px_rgba(16,185,129,0.4)]",
+        changeStatus === "modified" &&
+          "border-amber-500/60 shadow-[inset_0_0_10px_-4px_rgba(245,158,11,0.4)]",
         isDragging && "opacity-40",
       )}
     >
-      {changeStatus === undefined ? null : (
-        <span
-          title={changeStatus === "added" ? "New — uncommitted" : "Edited — uncommitted"}
-          className={cn(
-            "absolute top-2.5 right-2.5 size-1.5 rounded-full",
-            changeStatus === "added" ? "bg-emerald-500" : "bg-amber-500",
-          )}
-        />
-      )}
       {presence.length > 0 ? (
         <span className="absolute right-2 bottom-2 flex -space-x-1">
           {presence.slice(0, 4).map((user, index) => (
@@ -232,7 +231,7 @@ function BoardCard({
           ))}
         </span>
       ) : null}
-      <div className={cn("flex items-start", changeStatus !== undefined && "pr-4")}>
+      <div className="flex items-start">
         <span className="min-w-0 flex-1 text-sm leading-snug font-medium">{task.title}</span>
       </div>
       {task.summary === "" ? null : (

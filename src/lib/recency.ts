@@ -17,11 +17,11 @@ export type RecentTouch = {
 };
 
 /**
- * Watch the files map for remote touches and remember, per task path, who
- * touched it last and when. Authors come from each change's own Yjs items
- * (insertions carry their author's clientID; deletions from the
- * transaction's delete set), resolved through the doc's collaborators map.
- * Own edits never glow. Entries expire after the TTL.
+ * Watch the files map for touches and remember, per task path, who touched
+ * it last and when. Authors come from the transaction's own state-vector
+ * diff (deletions from its delete set), resolved through the doc's
+ * collaborators map. Own edits glow too — same as everyone else's, so the
+ * feature is visible even solo. Entries expire after the TTL.
  */
 export function useRecentTouches(doc: Y.Doc | null, active: boolean): Map<string, RecentTouch> {
   const [touches, setTouches] = useState<Map<string, RecentTouch>>(() => new Map());
@@ -52,7 +52,6 @@ export function useRecentTouches(doc: Y.Doc | null, active: boolean): Map<string
     };
 
     const observer = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>, transaction: Y.Transaction) => {
-      if (transaction.local) return;
       const author = transactionAuthor(doc, transaction);
       if (author === null) return;
       const now = Date.now();
@@ -91,7 +90,7 @@ export function useRecentTouches(doc: Y.Doc | null, active: boolean): Map<string
 }
 
 /**
- * The single remote client behind one transaction, when it is unambiguous.
+ * The single client behind one transaction, when it is unambiguous.
  * Writers are whoever's state-vector clock advanced (covers map sets whose
  * fresh subtrees never appear in `changes.added`); pure deletions fall back
  * to the transaction's delete set.
@@ -104,7 +103,6 @@ export function transactionAuthor(doc: Y.Doc, transaction: Y.Transaction): Colla
   if (clients.size === 0) {
     for (const client of transaction.deleteSet.clients.keys()) clients.add(client);
   }
-  clients.delete(doc.clientID);
   if (clients.size !== 1) return null;
   return collaboratorFor(doc, [...clients][0]!);
 }
