@@ -62,7 +62,9 @@ export function Board({
       }}
     >
       <div className="min-h-0 min-w-0 flex-1 overflow-auto bg-muted/30 p-2">
-        <div className="flex min-h-full w-max min-w-full flex-col gap-4">
+        {/* w-max + mx-auto: wider than the viewport it scrolls as before,
+            narrower it floats centered. */}
+        <div className="mx-auto flex min-h-full w-max flex-col gap-4">
           {rows.map((row, rowIndex) => (
             <section
               key={row.key}
