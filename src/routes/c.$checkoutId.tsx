@@ -14,6 +14,7 @@ import {
 } from "../lib/checkout-shared.ts";
 import {
   applyVerifiedIdentity,
+  assignAgentOp,
   commitCheckoutOp,
   generateCheckoutMessageOp,
   useCheckout,
@@ -178,12 +179,12 @@ function CheckoutPage() {
             <SidebarTrigger className="-ml-1" />
             <CheckoutBreadcrumbs repoPath={repoPath} checkoutId={checkoutId} />
           </header>
-          <div className="flex flex-col gap-3 p-4">
-            <Skeleton className="h-8 w-64" />
-            <div className="flex gap-2">
-              <Skeleton className="h-40 w-72" />
-              <Skeleton className="h-40 w-72" />
-              <Skeleton className="h-40 w-72" />
+          <div className="flex flex-1 flex-col items-center gap-3 bg-muted/30 p-4">
+            <div className="flex justify-center gap-2">
+              <Skeleton className="h-44 w-72" />
+              <Skeleton className="h-44 w-72" />
+              <Skeleton className="hidden h-44 w-72 md:block" />
+              <Skeleton className="hidden h-44 w-72 lg:block" />
             </div>
             <p className="text-sm text-muted-foreground">
               {status === "disconnected" ? "disconnected — retrying…" : "opening the checkout…"}
@@ -494,6 +495,9 @@ function ReadyCheckout({
         }
         onChangeState={(state) => {
           if (openTask !== null) writeTask(openTask.path, setTaskCardState(openTask.source, state));
+        }}
+        onAssignAgent={async () => {
+          if (openTask !== null) await assignAgentOp(checkoutId, repoPath, openTask.path);
         }}
         onRevert={() => {
           if (openTask !== null) revertTask(openTask.path);

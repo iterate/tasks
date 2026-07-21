@@ -1,7 +1,8 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
-import { RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { BotIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { projectSlug } from "./checkout-header.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
 import { TaskStateIcon } from "./board.tsx";
@@ -47,6 +48,7 @@ export function TaskSheet({
   changeStatus,
   focusHeadline,
   onChangeState,
+  onAssignAgent,
   onRevert,
   onDelete,
   onClose,
@@ -59,10 +61,12 @@ export function TaskSheet({
   changeStatus: TaskChangeStatus | undefined;
   focusHeadline?: "select" | "end";
   onChangeState: (state: string) => void;
+  onAssignAgent: () => Promise<void>;
   onRevert: () => void;
   onDelete: () => void;
   onClose: () => void;
 }) {
+  const [assigning, setAssigning] = useState(false);
   return (
     <Sheet open={task !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
       <SheetContent
@@ -114,6 +118,37 @@ export function TaskSheet({
                 </span>
               ) : null}
               <div className="ml-auto flex items-center gap-1">
+                {task.agent !== null ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="max-w-48 min-w-0"
+                    title={task.agent}
+                    render={
+                      <a
+                        href={`https://os.iterate.com/projects/${projectSlug()}/agents/streams${task.agent}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      />
+                    }
+                  >
+                    <BotIcon aria-hidden className="size-3.5" />
+                    <span className="truncate font-mono text-xs">{task.agent}</span>
+                  </Button>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={assigning}
+                    onClick={() => {
+                      setAssigning(true);
+                      void onAssignAgent().finally(() => setAssigning(false));
+                    }}
+                  >
+                    <BotIcon aria-hidden className="size-3.5" />
+                    {assigning ? "Assigning…" : "Assign agent"}
+                  </Button>
+                )}
                 {changeStatus === undefined ? null : (
                   <Button
                     variant="ghost"

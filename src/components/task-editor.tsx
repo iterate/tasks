@@ -67,7 +67,9 @@ const glowField = StateField.define<DecorationSet>({
             add: [
               Decoration.mark({
                 attributes: {
-                  style: `background-color: ${color}2e; border-bottom: 1.5px solid ${color}; border-radius: 2px;`,
+                  // No border-radius: adjacent per-keystroke marks must read
+                  // as ONE straight underline, not a scalloped row of pills.
+                  style: `background-color: ${color}2e; border-bottom: 1.5px solid ${color};`,
                   "data-glow-id": String(id),
                   "data-glow-name": name,
                   "data-glow-at": String(at),

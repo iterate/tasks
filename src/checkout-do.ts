@@ -9,6 +9,12 @@ import type { CommitResult, TaskChangeSummary } from "./state.ts";
 import {
   fallbackCommitMessage,
   isTaskFilePath,
+  parseTaskCard,
+  setTaskCardAgent,
+  setTaskCardState,
+  taskAgentPath,
+  taskAssignmentInstructions,
+  taskColumnState,
   taskCommitMessagePrompt,
 } from "./tasks-model.ts";
 import {
@@ -191,6 +197,53 @@ export class TasksCheckoutDurableObject extends YServer {
     );
     this.#reportToIndex(projectId, repoPath);
     return result;
+  }
+
+  /**
+   * The apps/os assignment flow against the live doc: frontmatter first
+   * (state + agent, visible to every collaborator instantly), then ONE
+   * commit so a born agent always finds its durable assignment at HEAD,
+   * then birth-if-needed and the kickoff brief.
+   */
+  async assignAgentDoc(
+    credential: ProjectCredential,
+    projectId: string,
+    repoPath: string,
+    taskPath: string,
+  ): Promise<{ agentPath: string }> {
+    const text = checkoutFilesMap(this.document).get(taskPath);
+    if (text === undefined) throw new Error(`${taskPath} does not exist in this checkout`);
+    const source = text.toString();
+    const card = parseTaskCard(taskPath, source);
+    if (card.agent !== null) return { agentPath: card.agent };
+    const agentPath = taskAgentPath(repoPath, taskPath);
+    const staged =
+      taskColumnState(card.state) === "in-progress" ? source : setTaskCardState(source, "in-progress");
+    const content = setTaskCardAgent(staged, agentPath);
+    this.document.transact(() => {
+      applyTextEdit(text, content);
+    });
+    return this.#withCredentialDial(projectId, credential, async (dial) => {
+      await this.#commit(dial, repoPath, `Assign task: ${card.title}`);
+      await dial.withProject(async (project) => {
+        const agent = (
+          project as unknown as {
+            agents: {
+              get(path: string): {
+                processor: { snapshot(): Promise<{ state?: { birthCertificate?: unknown } }> };
+                create(): Promise<unknown>;
+                message(text: string): Promise<unknown>;
+              };
+            };
+          }
+        ).agents.get(agentPath);
+        const snapshot = await agent.processor.snapshot();
+        if ((snapshot.state?.birthCertificate ?? null) === null) await agent.create();
+        await agent.message(taskAssignmentInstructions(repoPath, taskPath));
+      });
+      this.#reportToIndex(projectId, repoPath);
+      return { agentPath };
+    });
   }
 
   async generateMessageDoc(credential: ProjectCredential, projectId: string): Promise<string> {

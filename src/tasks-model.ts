@@ -44,6 +44,32 @@ export function setTaskCardState(source: string, state: string): string {
   });
 }
 
+/** Record the assigned agent in frontmatter, preserving everything else. */
+export function setTaskCardAgent(source: string, agentPath: string): string {
+  return updateFrontmatter(source, (document) => {
+    document.set("agent", agentPath);
+  });
+}
+
+/** The conventional agent path for a task — apps/os's repoTaskAgentPath. */
+export function taskAgentPath(repoPath: string, taskPath: string): string {
+  const repoSlug = slugify(pathSegments(repoPath).at(-1) ?? "repo", 48) || "repo";
+  const taskSlug = slugify(taskPath.replace(/\.(?:md|markdown)$/i, ""), 120) || "task";
+  return `/agents/repos/${repoSlug}/tasks/${taskSlug}`;
+}
+
+/** The kickoff brief a freshly assigned agent receives — apps/os's wording. */
+export function taskAssignmentInstructions(repoPath: string, taskPath: string): string {
+  return [
+    `Work on the repo task at ${taskPath} in ${repoPath}.`,
+    "First, verify that the task frontmatter state is `in-progress`; set and commit it before doing any other work if it is not.",
+    "Read the task Markdown before starting and treat it as the durable source of truth.",
+    "Keep that task file current as you work. Commit implementation changes and task updates to the same repo.",
+    "Keep a lightweight work log in a final `## Comments` section. Add entries as `### <ISO timestamp> — <agent path>` followed by a short Markdown note; keep this section at the end of the file.",
+    "When the work is ready for human review, summarize the result in Comments and set the task frontmatter state to `in-review`.",
+  ].join("\n\n");
+}
+
 /**
  * Project a brand-new task file: slugified filename under `tasks/`,
  * frontmatter with the state (plus `author` when the creator is known),

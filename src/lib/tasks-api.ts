@@ -95,4 +95,10 @@ export interface TasksCheckout {
   commit(message: string): Promise<CommitResult>;
   /** AI one-liner for the current uncommitted change set. */
   generateMessage(): Promise<string>;
+  /**
+   * Assign an agent to one task, the apps/os way: sets `state: in-progress`
+   * + the `agent:` frontmatter, commits the checkout so the assignment is
+   * durable, births the agent if needed, and sends it the kickoff brief.
+   */
+  assignAgent(path: string): Promise<{ agentPath: string }>;
 }

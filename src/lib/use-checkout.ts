@@ -156,6 +156,14 @@ export function generateCheckoutMessageOp(checkoutId: string, repoPath: string):
   return withProject((project) => project.checkout(checkoutId, repoPath).generateMessage());
 }
 
+export function assignAgentOp(
+  checkoutId: string,
+  repoPath: string,
+  taskPath: string,
+): Promise<{ agentPath: string }> {
+  return withProject((project) => project.checkout(checkoutId, repoPath).assignAgent(taskPath));
+}
+
 /** The project's repos, for the sidebar's top-level hierarchy. */
 export function listRepos(): Promise<string[]> {
   return withProject((project) => project.repos());

@@ -34,6 +34,12 @@ type CheckoutStubOps = {
     message: string,
   ): Promise<CommitResult>;
   generateMessageDoc(credential: ProjectCredential, projectId: string): Promise<string>;
+  assignAgentDoc(
+    credential: ProjectCredential,
+    projectId: string,
+    repoPath: string,
+    taskPath: string,
+  ): Promise<{ agentPath: string }>;
 };
 
 /**
@@ -204,6 +210,11 @@ export class TasksCheckoutApi extends RpcTarget implements TasksCheckout {
   async generateMessage(): Promise<string> {
     const stub = await this.#ready();
     return stub.generateMessageDoc(this.#credential, this.#projectId);
+  }
+
+  async assignAgent(path: string): Promise<{ agentPath: string }> {
+    const stub = await this.#ready();
+    return stub.assignAgentDoc(this.#credential, this.#projectId, this.#repoPath, path);
   }
 
   #do(): Promise<CheckoutStubOps> {
