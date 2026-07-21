@@ -6,12 +6,6 @@
  */
 import { parseDocument, type Document } from "yaml";
 import { BOARD_COLUMNS, type TaskCard, type TaskChangeSummary } from "./state.ts";
-import {
-  effectiveEntry,
-  textContentForEntry,
-  type FileEntry,
-  type WorkingTreeChanges,
-} from "./lib/working-tree.ts";
 
 const DEFAULT_TASK_STATE = BOARD_COLUMNS[0];
 const MAX_TASK_FILENAME_SLUG_LENGTH = 64;
@@ -95,57 +89,6 @@ export function taskPathForTitle(title: string, suffix?: string): string {
   return `tasks/${collisionBase}${suffixText}.md`;
 }
 
-/** One uncommitted task-file change, carrying the entry the commit will send. */
-export type TaskChange = TaskChangeSummary & { entry: FileEntry };
-
-/**
- * Task-only working-tree changes for the board's badges + commit UI. Titles
- * prefer live content, then HEAD content for pure deletions.
- */
-export function listTaskChanges(
-  changes: WorkingTreeChanges,
-  headContents: Readonly<Record<string, string>>,
-): TaskChange[] {
-  const listed: TaskChange[] = [];
-  for (const [path, change] of changes) {
-    if (!isTaskFilePath(path)) continue;
-    const entry = effectiveEntry(change);
-    if (entry === undefined) continue;
-    const status: TaskChangeSummary["status"] =
-      entry.type === "delete" ? "deleted" : path in headContents ? "modified" : "added";
-    const content = textContentForEntry(entry) ?? headContents[path];
-    listed.push({
-      path,
-      status,
-      title: content === undefined ? taskNameForPath(path) : parseTaskCard(path, content).title,
-      entry,
-    });
-  }
-  return listed.sort((left, right) => left.path.localeCompare(right.path));
-}
-
-/**
- * The cards the board renders: HEAD contents with the working tree laid over
- * them — written files replace (or introduce) their card instantly, deletes
- * remove it. This is what makes a drag repaint before any commit exists.
- */
-export function overlayTaskCards(
-  headContents: Readonly<Record<string, string>>,
-  changes: WorkingTreeChanges,
-): TaskCard[] {
-  const contents = new Map(Object.entries(headContents));
-  for (const [path, change] of changes) {
-    if (!isTaskFilePath(path)) continue;
-    const entry = effectiveEntry(change);
-    const content = textContentForEntry(entry);
-    if (content !== undefined) contents.set(path, content);
-    else if (entry !== undefined) contents.delete(path);
-  }
-  return [...contents]
-    .map(([path, source]) => parseTaskCard(path, source))
-    .sort((a, b) => a.path.localeCompare(b.path));
-}
-
 /** Deterministic commit message when AI is unavailable or empty. */
 export function fallbackCommitMessage(changes: readonly TaskChangeSummary[]): string {
   if (changes.length === 0) return "Update tasks";
@@ -218,10 +161,6 @@ function normalizeTaskState(state: string | undefined): string {
 function firstHeadingTitle(body: string): string | undefined {
   const match = /^#\s+(.+?)\s*#*\s*$/m.exec(body);
   return match?.[1]?.trim();
-}
-
-function taskNameForPath(path: string): string {
-  return (pathSegments(path).at(-1) ?? "task").replace(/\.(?:md|markdown)$/i, "");
 }
 
 function parseMarkdownFrontmatter(content: string): {

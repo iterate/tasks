@@ -13,7 +13,7 @@ import { Badge } from "../ui/badge.tsx";
 import { Button } from "../ui/button.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { columnsForTasks, taskColumnState } from "../tasks-model.ts";
-import type { BoardTask, PresenceUser } from "../lib/board-model.ts";
+import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
 
 /**
  * The board proper, in the apps/os repo-ide dialect: rows are folder
@@ -253,21 +253,6 @@ export function TaskStateIcon({ state, className }: { state: string; className?:
       return <CircleCheckIcon aria-hidden className={cn(shared, "text-emerald-600")} />;
     default:
       return <CircleDashedIcon aria-hidden className={cn(shared, "text-muted-foreground")} />;
-  }
-}
-
-export function stateLabel(state: string): string {
-  switch (state) {
-    case "todo":
-      return "Todo";
-    case "in-progress":
-      return "In progress";
-    case "in-review":
-      return "In review";
-    case "done":
-      return "Done";
-    default:
-      return state;
   }
 }
 

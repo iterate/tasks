@@ -1,8 +1,7 @@
 import { RpcTarget } from "capnweb";
 import { getServerByName } from "partyserver";
-import type { AppEnv } from "./board-do.ts";
-import { ProjectDial, type TasksCheckoutDurableObject } from "./checkout-do.ts";
-import type { TasksCheckoutIndexDurableObject } from "./checkout-index-do.ts";
+import type { AppEnv } from "./env.ts";
+import { ProjectDial } from "./checkout-do.ts";
 import type { CommitResult, TaskChangeSummary } from "./state.ts";
 import type {
   CheckoutIndexEntry,
@@ -16,11 +15,6 @@ import type {
 import { DEFAULT_REPO_PATH, isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
 const AUTH_COOKIE = "iterate-project-auth";
-
-export type VesselEnv = AppEnv & {
-  CHECKOUT: DurableObjectNamespace<TasksCheckoutDurableObject>;
-  INDEX: DurableObjectNamespace<TasksCheckoutIndexDurableObject>;
-};
 
 /**
  * The checkout DO's plain-data RPC surface (native workerd RPC on the stub —
@@ -51,10 +45,10 @@ type CheckoutStubOps = {
  * project this session is — the dial fails if the claim is a lie.
  */
 export class TasksApiRoot extends RpcTarget implements TasksApi {
-  readonly #env: VesselEnv;
+  readonly #env: AppEnv;
   readonly #cookieToken: string | undefined;
 
-  constructor(env: VesselEnv, request: Request) {
+  constructor(env: AppEnv, request: Request) {
     super();
     this.#env = env;
     this.#cookieToken = readCookie(request, AUTH_COOKIE);
@@ -95,12 +89,12 @@ export class TasksApiRoot extends RpcTarget implements TasksApi {
 }
 
 export class TasksProjectApi extends RpcTarget implements TasksProject {
-  readonly #env: VesselEnv;
+  readonly #env: AppEnv;
   readonly #dial: ProjectDial;
   readonly #projectId: string;
   readonly #credential: ProjectCredential;
 
-  constructor(env: VesselEnv, dial: ProjectDial, projectId: string, credential: ProjectCredential) {
+  constructor(env: AppEnv, dial: ProjectDial, projectId: string, credential: ProjectCredential) {
     super();
     this.#env = env;
     this.#dial = dial;
@@ -158,7 +152,7 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
  * with their own.
  */
 export class TasksCheckoutApi extends RpcTarget implements TasksCheckout {
-  readonly #env: VesselEnv;
+  readonly #env: AppEnv;
   readonly #projectId: string;
   readonly #credential: ProjectCredential;
   readonly #checkoutId: string;
@@ -167,7 +161,7 @@ export class TasksCheckoutApi extends RpcTarget implements TasksCheckout {
   #seeded: Promise<void> | null = null;
 
   constructor(
-    env: VesselEnv,
+    env: AppEnv,
     projectId: string,
     credential: ProjectCredential,
     checkoutId: string,

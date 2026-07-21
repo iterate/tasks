@@ -11,6 +11,30 @@ export type BoardTask = TaskCard & {
 
 export type PresenceUser = { name: string; color: string };
 
+/** One remote collaborator, as read from Yjs awareness. */
+export type Peer = {
+  id: number;
+  user: PresenceUser;
+  email?: string;
+  userId?: string;
+  openPath: string | null;
+};
+
+export function stateLabel(state: string): string {
+  switch (state) {
+    case "todo":
+      return "Todo";
+    case "in-progress":
+      return "In progress";
+    case "in-review":
+      return "In review";
+    case "done":
+      return "Done";
+    default:
+      return state;
+  }
+}
+
 export function toBoardTask(path: string, source: string): BoardTask {
   const card = parseTaskCard(path, source);
   return { ...card, folder: taskFolder(path), summary: taskSummary(source) };

@@ -1,10 +1,16 @@
+import { lazy, Suspense } from "react";
 import type * as Y from "yjs";
 import type { Awareness } from "y-protocols/awareness";
 import { RotateCcwIcon, Trash2Icon } from "lucide-react";
 import type { TaskChangeStatus } from "../state.ts";
-import type { BoardTask, PresenceUser } from "../lib/board-model.ts";
-import { stateLabel, TaskStateIcon } from "./board.tsx";
-import { TaskEditor } from "./task-editor.tsx";
+import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
+import { TaskStateIcon } from "./board.tsx";
+
+// CodeMirror (plus the Yjs binding) is by far the heaviest thing this app
+// ships; it only matters once a task sheet opens, so it loads on demand.
+const TaskEditor = lazy(() =>
+  import("./task-editor.tsx").then((module) => ({ default: module.TaskEditor })),
+);
 import { Button } from "../ui/button.tsx";
 import {
   Select,
@@ -154,7 +160,11 @@ export function TaskSheet({
               {text === undefined ? (
                 <p className="p-4 text-sm text-muted-foreground">This task no longer exists.</p>
               ) : (
-                <TaskEditor path={task.path} text={text} awareness={awareness} />
+                <Suspense
+                  fallback={<p className="p-4 text-sm text-muted-foreground">opening editor…</p>}
+                >
+                  <TaskEditor path={task.path} text={text} awareness={awareness} />
+                </Suspense>
               )}
             </div>
           </>

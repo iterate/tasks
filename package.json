@@ -22,7 +22,6 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "iterate": "https://pkg.pr.new/iterate/iterate/iterate@b62c471f4",
-    "lib0": "^0.2.117",
     "lucide-react": "^0.553.0",
     "partyserver": "^0.5.8",
     "react": "^19.2.7",
@@ -31,7 +30,6 @@
     "y-codemirror.next": "^0.3.5",
     "y-partyserver": "^2.2.0",
     "y-protocols": "^1.0.7",
-    "y-websocket": "^3.0.0",
     "yaml": "^2.8.0",
     "yjs": "^13.6.31"
   },

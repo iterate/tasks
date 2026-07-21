@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
-import { CheckIcon, LinkIcon, SearchIcon, Settings2Icon } from "lucide-react";
+import { SearchIcon, Settings2Icon } from "lucide-react";
 import {
   DEFAULT_REPO_PATH,
   applyTextEdit,
@@ -17,8 +17,6 @@ import {
   applyVerifiedIdentity,
   commitCheckoutOp,
   generateCheckoutMessageOp,
-  localCollabUser,
-  renameCollabUser,
   useCheckout,
   whoami,
 } from "../lib/use-checkout.ts";
@@ -38,12 +36,13 @@ import {
   taskPathInFolder,
   toBoardTask,
   type BoardTask,
+  type Peer,
   type PresenceUser,
 } from "../lib/board-model.ts";
 import { Board } from "../components/board.tsx";
 import { TaskSheet } from "../components/task-sheet.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
-import { Button } from "../ui/button.tsx";
+import { PresenceStrip, ShareLink } from "../components/presence.tsx";
 import { Input } from "../ui/input.tsx";
 import {
   Select,
@@ -77,14 +76,6 @@ export const Route = createFileRoute("/c/$checkoutId")({
   },
   component: CheckoutPage,
 });
-
-type Peer = {
-  id: number;
-  user: PresenceUser;
-  email?: string;
-  userId?: string;
-  openPath: string | null;
-};
 
 /**
  * The collaborative board page. Everything above the board lives in ONE
@@ -126,10 +117,11 @@ function CheckoutPage() {
     void docVersion; // dependency: recompute when the doc changes
     const files = checkoutFileContents(doc);
     const base = checkoutBaseContents(doc);
-    const tasks = Object.entries(files)
-      .filter(([path]) => isTaskFilePath(path))
-      .map(([path, source]) => toBoardTask(path, source))
-      .sort((a, b) => a.path.localeCompare(b.path));
+    const tasks: BoardTask[] = [];
+    for (const [path, source] of Object.entries(files)) {
+      if (isTaskFilePath(path)) tasks.push(toBoardTask(path, source));
+    }
+    tasks.sort((a, b) => a.path.localeCompare(b.path));
     return {
       files,
       base,
@@ -486,89 +478,3 @@ function inFolder(path: string, folder: string | null): string {
   return folder === null || folder === "/" ? path : taskPathInFolder(path, folder);
 }
 
-/**
- * You + everyone else in the checkout. Chips show the verified identity
- * when the platform provided one — hover for email, userId, and what the
- * person has open (the OS stream-processor presence vocabulary). Click your
- * own chip to override the display name.
- */
-function PresenceStrip({
-  provider,
-  peers,
-  me,
-}: {
-  provider: YProvider;
-  peers: Peer[];
-  me: TasksUser | null;
-}) {
-  const [self, setSelf] = useState(() =>
-    typeof window === "undefined" ? null : localCollabUser(),
-  );
-  if (self === null) return null;
-  const selfName = me?.name ?? me?.email ?? self.name;
-  const selfTitle = presenceTitle("You — click to rename", me?.email, me?.userId, null);
-  return (
-    <span className="flex items-center gap-1">
-      <button
-        type="button"
-        title={selfTitle}
-        onClick={() => {
-          const name = window.prompt("Your collaborator name", selfName);
-          if (name?.trim()) setSelf(renameCollabUser(provider, name));
-        }}
-        className="rounded-full border bg-transparent px-2 py-0.5 text-[11px]"
-        style={{ color: self.color, borderColor: `${self.color}66` }}
-      >
-        {selfName}
-      </button>
-      {peers.map((peer) => (
-        <span
-          key={peer.id}
-          title={presenceTitle(peer.user.name, peer.email, peer.userId, peer.openPath)}
-          className="rounded-full border px-2 py-0.5 text-[11px]"
-          style={{ color: peer.user.color, borderColor: `${peer.user.color}66` }}
-        >
-          {peer.user.name}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function presenceTitle(
-  name: string,
-  email: string | null | undefined,
-  userId: string | null | undefined,
-  openPath: string | null,
-): string {
-  const lines = [name];
-  if (email) lines.push(email);
-  if (userId) lines.push(userId);
-  if (openPath) lines.push(`editing ${openPath}`);
-  return lines.join("\n");
-}
-
-function ShareLink() {
-  const [copied, setCopied] = useState(false);
-  return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="h-8 text-xs text-muted-foreground"
-      title="Copy share link"
-      onClick={() => {
-        void navigator.clipboard.writeText(window.location.href).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-    >
-      {copied ? (
-        <CheckIcon aria-hidden className="size-3.5" />
-      ) : (
-        <LinkIcon aria-hidden className="size-3.5" />
-      )}
-      {copied ? "Copied" : "Share"}
-    </Button>
-  );
-}

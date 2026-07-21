@@ -2,21 +2,16 @@ import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { env as workerEnv } from "cloudflare:workers";
 import { newWorkersWebSocketRpcResponse } from "capnweb";
 import { getServerByName } from "partyserver";
-import type { TasksBoardDurableObject } from "./board-do.ts";
-import type { TasksCheckoutDurableObject } from "./checkout-do.ts";
-import type { AppEnv } from "./board-do.ts";
-import { TasksApiRoot, type VesselEnv } from "./rpc-api.ts";
+import type { AppEnv } from "./env.ts";
+import { TasksApiRoot } from "./rpc-api.ts";
 import { isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
-export { TasksBoardDurableObject } from "./board-do.ts";
 export { TasksCheckoutDurableObject } from "./checkout-do.ts";
 export { TasksCheckoutIndexDurableObject } from "./checkout-index-do.ts";
 
 // wrangler.jsonc declares exactly these; the app is small enough that a
 // hand-written env type beats generated worker configuration types.
-const env = workerEnv as unknown as VesselEnv & {
-  BOARD: DurableObjectNamespace<TasksBoardDurableObject>;
-};
+const env = workerEnv as unknown as AppEnv;
 
 const PROJECT_ID_HEADER = "x-itx-project-id";
 

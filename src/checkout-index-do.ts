@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import type { AppEnv } from "./board-do.ts";
+import type { AppEnv } from "./env.ts";
 import type { CheckoutIndexEntry } from "./lib/tasks-api.ts";
 
 /**

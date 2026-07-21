@@ -5,9 +5,11 @@
   "compatibility_date": "2026-06-17",
   "compatibility_flags": ["nodejs_compat"],
   "exports": {
+    // Tombstone: the pre-checkout board DO, retired (superseded by
+    // checkouts + the checkout index).
     "TasksBoardDurableObject": {
       "type": "durable-object",
-      "storage": "sqlite",
+      "state": "deleted",
     },
     "TasksCheckoutDurableObject": {
       "type": "durable-object",
@@ -20,10 +22,6 @@
   },
   "durable_objects": {
     "bindings": [
-      {
-        "name": "BOARD",
-        "class_name": "TasksBoardDurableObject",
-      },
       {
         "name": "CHECKOUT",
         "class_name": "TasksCheckoutDurableObject",

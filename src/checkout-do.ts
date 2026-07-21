@@ -4,7 +4,7 @@ import type { Project, UnauthenticatedOs } from "iterate/client";
 import * as Y from "yjs";
 import { YServer } from "y-partyserver";
 import type { Connection, ConnectionContext } from "partyserver";
-import type { AppEnv } from "./board-do.ts";
+import type { AppEnv } from "./env.ts";
 import type { CommitResult, TaskChangeSummary } from "./state.ts";
 import {
   fallbackCommitMessage,
@@ -84,16 +84,9 @@ export class TasksCheckoutDurableObject extends YServer {
   #reportToIndex(projectId: string, repoPath: string): void {
     const checkoutId = this.name.split(":").at(-1);
     if (!checkoutId) return;
-    const index = (
-      this.env as unknown as {
-        INDEX: DurableObjectNamespace<
-          import("./checkout-index-do.ts").TasksCheckoutIndexDurableObject
-        >;
-      }
-    ).INDEX;
     this.ctx.waitUntil(
-      index
-        .getByName(projectId)
+      this.#env()
+        .INDEX.getByName(projectId)
         .record({ repoPath, checkoutId, baseCommit: checkoutBaseCommit(this.document) })
         .catch(() => {}),
     );

@@ -1,0 +1,5 @@
+# Supply-chain hardening: wait out fresh releases (malware usually gets
+# caught and unpublished within days) and never accept weakened trust
+# signals on update.
+minimumReleaseAge: 10080
+trustPolicy: no-downgrade

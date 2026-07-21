@@ -23,7 +23,7 @@ const STATUS_WORD: Record<TaskChangeStatus, string> = {
 };
 
 /** The A/M/D letter a changed row wears. */
-export function ChangeStatusMark({ status }: { status: TaskChangeStatus }) {
+function ChangeStatusMark({ status }: { status: TaskChangeStatus }) {
   return (
     <span
       title={STATUS_WORD[status]}

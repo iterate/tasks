@@ -1,5 +1,3 @@
-import type { LiveStateRpc } from "iterate/live-state";
-
 /**
  * One task card, parsed from a markdown file under tasks/ in the project's
  * /repos/config repo (frontmatter `state`/`labels`/`agent` plus title and
@@ -18,18 +16,6 @@ export type TaskCard = {
 
 /** The canonical Kanban columns, in board order. Custom states get their own column after these. */
 export const BOARD_COLUMNS = ["todo", "in-progress", "in-review", "done"] as const;
-
-/** The whole board — the live-state value every connected browser mirrors. */
-export type BoardState = {
-  /** "connecting" until the first successful listTaskFiles; "ready" once tasks are loaded. */
-  status: "connecting" | "ready" | "error";
-  /** Human-readable failure when status is "error" (bad token, unreachable os, …). */
-  error: string | null;
-  projectId: string | null;
-  /** HEAD commit the current tasks were read at. */
-  commitOid: string | null;
-  tasks: TaskCard[];
-};
 
 /** One repo file mutation — the wire shape `commitFiles` takes. */
 export type RepoFileChange =
@@ -55,21 +41,3 @@ export type CommitResult = {
   noChanges: boolean;
 };
 
-/**
- * The Cap'n Web capability a browser holds after connecting to a board's
- * Durable Object: read side is live state (snapshot + patches) carrying the
- * HEAD checkout of tasks/; write side is one batched `commitChanges` — the
- * browser models its own git-shaped working tree (src/lib/working-tree.ts)
- * and flushes it as a single commit to the project's /repos/config through
- * the platform's itx /api, attributed to the calling session's user.
- * Shared by the server session (board-do.ts) and the client hook (lib/use-board.ts).
- */
-export type BoardApi = {
-  liveState: LiveStateRpc<BoardState>;
-  /** One git commit of accumulated task-file changes as the calling user. */
-  commitChanges(input: { message: string; changes: RepoFileChange[] }): Promise<CommitResult>;
-  /** AI one-liner for the pending change set (falls back deterministically). */
-  generateCommitMessage(input: { changes: TaskChangeSummary[] }): Promise<string>;
-  /** Re-read tasks from the repo HEAD now (also runs on a poll alarm). */
-  refresh(): Promise<void>;
-};
