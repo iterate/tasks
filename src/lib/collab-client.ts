@@ -17,8 +17,10 @@ import type { CollabChanges, CollabWaitResult, TasksWorkspace } from "./tasks-ap
  * authority; this client optimistically applies local edits and rebases
  * unconfirmed ones over every delivered batch.
  */
+const freshClientId = () => `web-${Math.random().toString(36).slice(2, 10)}`;
+
 export class CollabConnection {
-  readonly clientId = `web-${Math.random().toString(36).slice(2, 10)}`;
+  clientId = freshClientId();
   epoch = "";
   /** Own ops seen back in deliveries — the stable clientSeq base. */
   confirmed = 0;
@@ -97,6 +99,10 @@ export class CollabConnection {
   reseed(snapshot: { content: string; epoch: string; version: number }): void {
     this.epoch = snapshot.epoch;
     this.confirmed = 0;
+    // Fresh dedupe identity: same-epoch recovery restarts clientSeq at 0, and
+    // the server has already acked the old (clientId, seq) pairs — reusing
+    // them would silently drop every carried edit.
+    this.clientId = freshClientId();
     this.synced = Text.of(snapshot.content.split("\n"));
   }
 

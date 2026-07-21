@@ -31,6 +31,8 @@ function CollabPage() {
   const host = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState("connecting…");
   const [redline, setRedline] = useState(true);
+  const redlineRef = useRef(redline);
+  redlineRef.current = redline;
   const toggleRef = useRef<((on: boolean) => void) | null>(null);
 
   useEffect(() => {
@@ -81,6 +83,9 @@ function CollabPage() {
       // like ordinary typing.
       const splice = commonSplice(snapshot.content, carried);
       if (splice !== null) view.dispatch({ changes: splice });
+      // The rebuild starts with an empty redline compartment — re-apply the
+      // toggle's current state so the layers survive the re-sync.
+      toggleRef.current?.(redlineRef.current);
       setStatus(`re-synced · v${snapshot.version}`);
     };
 

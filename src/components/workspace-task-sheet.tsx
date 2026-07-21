@@ -88,6 +88,8 @@ function SheetBody({
   const host = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState("connecting…");
   const [redline, setRedline] = useState(false);
+  const redlineRef = useRef(redline);
+  redlineRef.current = redline;
   const toggleRef = useRef<((on: boolean) => void) | null>(null);
 
   useEffect(() => {
@@ -137,6 +139,7 @@ function SheetBody({
       view.setState(buildState(snapshot.content, snapshot.version, []));
       const splice = commonSplice(snapshot.content, carried);
       if (splice !== null) view.dispatch({ changes: splice });
+      toggleRef.current?.(redlineRef.current);
     };
 
     void connection

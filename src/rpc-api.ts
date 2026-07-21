@@ -324,10 +324,16 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       try {
         return await operation(ws);
       } catch (error) {
-        if (this.#created || !/does not exist/.test(errorText(error))) throw error;
-        await ws.create({
-          mounts: { "/": { policy: "commit-to-main", repoPath: this.#repoPath } },
-        });
+        // Only the workspace-missing error (exact platform phrasing) triggers
+        // lazy creation — a file-level "does not exist" must surface as-is.
+        if (this.#created || !/workspace "[^"]+" does not exist/.test(errorText(error))) {
+          throw error;
+        }
+        // Concurrent first-touchers may race create: tolerate its failure and
+        // retry the operation regardless — ITS error is the one that matters.
+        await ws
+          .create({ mounts: { "/": { policy: "commit-to-main", repoPath: this.#repoPath } } })
+          .catch(() => undefined);
         this.#created = true;
         return await operation(ws);
       }
