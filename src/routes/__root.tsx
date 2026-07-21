@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
+import { getSidebarDefaultOpen } from "../lib/sidebar-state.ts";
 import { SidebarInset, SidebarProvider } from "../ui/sidebar.tsx";
 import { TooltipProvider } from "../ui/tooltip.tsx";
 import { AppSidebar } from "../components/app-sidebar.tsx";
@@ -14,6 +15,9 @@ export const Route = createRootRoute({
     ],
     links: [{ rel: "stylesheet", href: appCss }],
   }),
+  loader: async () => ({
+    sidebarDefaultOpen: (await getSidebarDefaultOpen()).defaultOpen,
+  }),
   component: RootComponent,
 });
 
@@ -23,10 +27,11 @@ export const Route = createRootRoute({
  * its own top strip (the board's filter bar).
  */
 function RootComponent() {
+  const { sidebarDefaultOpen } = Route.useLoaderData();
   return (
     <RootDocument>
       <TooltipProvider delay={0}>
-        <SidebarProvider className="h-svh">
+        <SidebarProvider defaultOpen={sidebarDefaultOpen} className="h-svh">
           <AppSidebar />
           <SidebarInset className="min-w-0 overflow-hidden">
             <Outlet />
