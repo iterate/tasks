@@ -287,6 +287,7 @@ type WorkspaceStub = {
   readBase(path: string): Promise<string | null>;
   glob(pattern: string): Promise<string[]>;
   readFile(path: string): Promise<string | null>;
+  readFiles(paths: string[]): Promise<Record<string, string | null>>;
   writeFile(path: string, content: string): Promise<void>;
   deleteFile(path: string): Promise<boolean>;
   revert(path: string): Promise<void>;
@@ -296,10 +297,6 @@ type WorkspaceStub = {
     log(input?: { limit?: number }): Promise<unknown>;
   };
 };
-
-/** Reads on the board seed run concurrently, but never unbounded — a big
- * repo must not turn one board load into thousands of parallel DO calls. */
-const BOARD_READ_CONCURRENCY = 8;
 
 /**
  * The checkout AS a platform workspace, forwarded over the vessel's live
@@ -394,16 +391,12 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
   async files(): Promise<Record<string, string>> {
     return this.#withWorkspace(async (ws) => {
       const paths = await ws.glob("**/tasks/**/*.md");
-      const entries: [string, string][] = [];
-      for (let index = 0; index < paths.length; index += BOARD_READ_CONCURRENCY) {
-        const chunk = paths.slice(index, index + BOARD_READ_CONCURRENCY);
-        entries.push(
-          ...(await Promise.all(
-            chunk.map(async (path) => [path, (await ws.readFile(path)) ?? ""] as [string, string]),
-          )),
-        );
-      }
-      return Object.fromEntries(entries);
+      // ONE batched platform call for the whole set — per-file reads through
+      // this chain collapse at thousands of tasks.
+      const contents = await ws.readFiles(paths);
+      return Object.fromEntries(
+        Object.entries(contents).map(([path, content]) => [path, content ?? ""]),
+      );
     });
   }
 
