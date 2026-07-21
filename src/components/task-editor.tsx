@@ -181,6 +181,10 @@ export function TaskEditor({
         });
       }
       view.focus();
+    } else {
+      // Opening an existing task: ready to type, caret at the end.
+      view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+      view.focus();
     }
 
     // yCollab's own Y observer registered first (at view creation), so by
