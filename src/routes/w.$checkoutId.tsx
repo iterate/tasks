@@ -8,6 +8,7 @@ import { WorkspaceTaskSheet } from "../components/workspace-task-sheet.tsx";
 import { useWorkspaceBoard } from "../lib/use-workspace-board.ts";
 import { DEFAULT_REPO_PATH, normalizeRepoPath } from "../lib/checkout-shared.ts";
 import { columnsForTasks, newTaskFile, setTaskCardState, taskColumnState } from "../tasks-model.ts";
+import { projectBoard } from "../lib/board-engine.ts";
 import type { BoardTask } from "../lib/board-model.ts";
 
 /**
@@ -43,16 +44,15 @@ function WorkspaceBoardPage() {
     [navigate],
   );
 
-  const filtered = useMemo(() => {
-    const query = search.q.trim().toLowerCase();
-    if (query === "") return board.tasks;
-    return board.tasks.filter(
-      (task) =>
-        task.title.toLowerCase().includes(query) ||
-        task.path.toLowerCase().includes(query) ||
-        task.labels.some((label) => label.toLowerCase().includes(query)),
-    );
-  }, [board.tasks, search.q]);
+  const projection = useMemo(
+    () =>
+      projectBoard({
+        filter: search.q,
+        rowField: search.group === "folder" ? "folder" : null,
+        tasks: board.tasks,
+      }),
+    [board.tasks, search.q, search.group],
+  );
 
   const columns = useMemo(
     () => columnsForTasks(board.tasks).map((column) => column.state),
@@ -153,8 +153,7 @@ function WorkspaceBoardPage() {
           <p className="p-6 text-sm text-muted-foreground">Loading workspace…</p>
         ) : (
           <Board
-            tasks={filtered}
-            rowField={search.group === "folder" ? "folder" : null}
+            projection={projection}
             taskChangeByPath={board.changes}
             presenceByPath={new Map()}
             recentByPath={new Map()}
