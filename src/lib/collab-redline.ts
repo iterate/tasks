@@ -39,9 +39,20 @@ class DeletionFlag extends WidgetType {
   }
 }
 
-function decorate(segments: CollabChangeSegment[], docLength: number): DecorationSet {
+export function decorate(segments: CollabChangeSegment[], docLength: number): DecorationSet {
   const builder = new RangeSetBuilder<Decoration>();
-  for (const segment of segments) {
+  // RangeSetBuilder demands ascending positions; the server sorts, but
+  // clamping (and any future source) must not be able to crash the layer —
+  // sort defensively, deletions before insertions at a tie.
+  const ordered = [...segments].sort((left, right) => {
+    const position = (segment: CollabChangeSegment) =>
+      segment.kind === "inserted" ? Math.min(segment.from, docLength) : Math.min(segment.at, docLength);
+    return (
+      position(left) - position(right) ||
+      (left.kind === "deleted" ? -1 : 0) - (right.kind === "deleted" ? -1 : 0)
+    );
+  });
+  for (const segment of ordered) {
     if (segment.kind === "deleted") {
       const at = Math.min(segment.at, docLength);
       builder.add(at, at, Decoration.widget({ side: -1, widget: new DeletionFlag(segment.clientId, segment.text) }));

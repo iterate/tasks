@@ -15,18 +15,26 @@ import { toBoardTask, type BoardTask } from "./board-model.ts";
 
 const POLL_MS = 3500;
 
+/** ONE key form for everything the board holds: repo-relative, no leading
+ * slash — the same shape the Yjs lane's task paths and isTaskFilePath use.
+ * The platform returns absolute paths from glob/status; writes go back
+ * absolute. Mixing forms silently splits sessions and misses badges. */
+export function boardKey(path: string): string {
+  return path.replace(/^\/+/, "");
+}
+
 type WorkspaceStatusShape = {
   mounts?: { changes?: { change: string; path: string }[] }[];
 };
 
-function changeMap(status: unknown): Map<string, TaskChangeStatus> {
+export function changeMap(status: unknown): Map<string, TaskChangeStatus> {
   const map = new Map<string, TaskChangeStatus>();
   for (const mount of (status as WorkspaceStatusShape).mounts ?? []) {
     for (const entry of mount.changes ?? []) {
       if (!isTaskFilePath(entry.path)) continue;
       const kind =
         entry.change === "added" ? "added" : entry.change === "deleted" ? "deleted" : "modified";
-      map.set(entry.path.replace(/^\//, ""), kind);
+      map.set(boardKey(entry.path), kind);
     }
   }
   return map;
@@ -59,7 +67,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     void Promise.all([lane((ws) => ws.files()), lane((ws) => ws.status())])
       .then(([seeded, status]) => {
         if (generation.current !== mine) return;
-        setFiles(seeded);
+        setFiles(Object.fromEntries(Object.entries(seeded).map(([path, c]) => [boardKey(path), c])));
         setChanges(changeMap(status));
       })
       .catch((cause: unknown) => {
@@ -86,7 +94,9 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
           for (const path of changes.keys()) if (!next.has(path)) moved.add(path);
           if (moved.size === 0) return;
           const fetched = await Promise.all(
-            [...moved].map(async (path) => [path, await lane((ws) => ws.read(`/${path}`))] as const),
+            [...moved].map(
+              async (path) => [boardKey(path), await lane((ws) => ws.read(`/${boardKey(path)}`))] as const,
+            ),
           );
           if (generation.current !== mine) return;
           setChanges(next);
