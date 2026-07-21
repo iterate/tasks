@@ -1,5 +1,5 @@
 import { DragDropProvider, useDraggable, useDroppable } from "@dnd-kit/react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   CircleCheckIcon,
   CircleDashedIcon,
@@ -156,6 +156,9 @@ export function Board({
   );
 }
 
+/** Cards mounted per cell before "show more" paging kicks in. */
+const CELL_PAGE = 60;
+
 function BoardCell({
   state,
   rowKey,
@@ -185,6 +188,10 @@ function BoardCell({
     id: `cell:${encodeURIComponent(rowKey)}:${encodeURIComponent(state)}`,
     accept: "task",
   });
+  // DOM stays bounded no matter how big the board gets: cells render a page
+  // of cards and grow on demand. 4k mounted cards froze drag outright.
+  const [limit, setLimit] = useState(CELL_PAGE);
+  const visible = tasks.length > limit ? tasks.slice(0, limit) : tasks;
   return (
     <section
       ref={ref}
@@ -195,7 +202,7 @@ function BoardCell({
     >
       <div className="flex min-h-0 flex-1 flex-col px-1 pb-1">
         <div className="flex flex-col gap-2">
-          {tasks.map((task) => (
+          {visible.map((task) => (
             <BoardCard
               key={task.path}
               task={task}
@@ -208,6 +215,16 @@ function BoardCell({
               onOpen={onOpen}
             />
           ))}
+          {tasks.length > limit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-full justify-center text-xs text-muted-foreground"
+              onClick={() => setLimit((current) => current + CELL_PAGE)}
+            >
+              Show {Math.min(CELL_PAGE, tasks.length - limit)} more ({tasks.length - limit} hidden)
+            </Button>
+          )}
         </div>
         <Button
           variant="ghost"
