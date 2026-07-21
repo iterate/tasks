@@ -213,10 +213,24 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   /** Live content from an open editor session — keeps the card current
    * while typing without waiting for the flush + poll round trip. */
   const reflectLiveContent = useCallback((path: string, content: string) => {
-    setFiles((current) =>
-      current === null || current[path] === content ? current : { ...current, [path]: content },
-    );
+    setFiles((current) => {
+      if (current === null || current[path] === content) return current;
+      // A live edit IS dirtiness: commit controls must arm on the first
+      // keystroke, not on the next status poll.
+      setChanges((changes) =>
+        changes.has(path)
+          ? changes
+          : new Map(changes).set(path, changeAfterWrite(undefined, current[path] !== undefined)),
+      );
+      return { ...current, [path]: content };
+    });
   }, []);
+
+  /** One file's merged-view content (the live head when a session is open). */
+  const readTask = useCallback(
+    (path: string) => lane((ws) => ws.read(`/${path}`)),
+    [lane],
+  );
 
   /** Change summaries in the shape the commit controls speak. */
   const taskChanges = useMemo<TaskChangeSummary[]>(
@@ -294,6 +308,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     files,
     subscribeEvents,
     ready: files !== null,
+    readTask,
     reflectLiveContent,
     revertTask,
     taskChanges,

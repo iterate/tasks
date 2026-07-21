@@ -164,9 +164,22 @@ function WorkspaceBoardPage() {
         return;
       }
       const nextPath = taskPathInFolder(task.path, folder);
-      board.writeTask(nextPath, transform(sourceOf(task)));
-      board.deleteTask(task.path);
-      if (search.task === task.path) patchSearch({ task: nextPath });
+      const source = transform(sourceOf(task));
+      board.writeTask(nextPath, source);
+      if (search.task === task.path) {
+        patchSearch({ task: nextPath });
+        // The open editor's final frame may still reach the old session —
+        // carry any divergence over before the delete discards it.
+        void board.readTask(task.path).then(
+          (final) => {
+            if (final !== null && transform(final) !== source) board.writeTask(nextPath, transform(final));
+            board.deleteTask(task.path);
+          },
+          () => board.deleteTask(task.path),
+        );
+      } else {
+        board.deleteTask(task.path);
+      }
     },
     [applyLive, board, patchSearch, search.task, sourceOf],
   );
@@ -199,10 +212,19 @@ function WorkspaceBoardPage() {
       const source = sourceOf(task);
       if (board.files?.[target] !== undefined) return;
       board.writeTask(target, source);
-      board.deleteTask(draftPath);
       renamedDraftRef.current = true;
       setDraftPath(target);
       patchSearch({ task: target });
+      // The old editor unmounts with the navigation; a keystroke landing in
+      // its final frame lives in the old session's head — carry it over
+      // before the delete discards that session.
+      void board.readTask(draftPath).then(
+        (final) => {
+          if (final !== null && final !== source) board.writeTask(target, final);
+          board.deleteTask(draftPath);
+        },
+        () => board.deleteTask(draftPath),
+      );
     }, 700);
     return () => clearTimeout(timer);
   }, [draftPath, search.task, board, patchSearch, sourceOf]);
@@ -217,10 +239,18 @@ function WorkspaceBoardPage() {
         return 'Path must be a .md file inside a folder named "tasks".';
       if (nextPath === task.path) return null;
       if (board.files?.[nextPath] !== undefined) return "A file already exists at that path.";
-      board.writeTask(nextPath, sourceOf(task));
-      board.deleteTask(task.path);
+      const source = sourceOf(task);
+      board.writeTask(nextPath, source);
       setDraftPath((current) => (current === task.path ? nextPath : current));
       if (search.task === task.path) patchSearch({ task: nextPath });
+      // Same final-frame carry as the draft rename (see that effect).
+      void board.readTask(task.path).then(
+        (final) => {
+          if (final !== null && final !== source) board.writeTask(nextPath, final);
+          board.deleteTask(task.path);
+        },
+        () => board.deleteTask(task.path),
+      );
       return null;
     },
     [board, patchSearch, search.task, sourceOf],

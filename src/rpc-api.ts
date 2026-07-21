@@ -347,8 +347,11 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
         await ws
           .create({ mounts: { "/": { policy: "commit-to-main", repoPath: this.#repoPath } } })
           .catch(() => undefined);
+        // Proven by USE: only a successful retry marks the workspace created —
+        // a transient create failure must not wedge this held capability.
+        const result = await operation(ws);
         this.#created = true;
-        return await operation(ws);
+        return result;
       }
     });
   }

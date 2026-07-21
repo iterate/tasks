@@ -4,17 +4,20 @@ import { EditorView } from "@codemirror/view";
 import { CollabConnection, peerExtension, setCollabDisplayName } from "./collab-client.ts";
 import { whoami } from "./use-checkout.ts";
 
-let identityLoaded = false;
-async function ensureCollabIdentity(): Promise<void> {
-  if (identityLoaded) return;
-  identityLoaded = true;
-  try {
-    const me = await whoami();
-    const name = me.name ?? me.email ?? me.userId;
-    if (name) setCollabDisplayName(name);
-  } catch {
-    // Anonymous is fine — tooltips fall back to "someone".
-  }
+// The PROMISE is the memo: a second editor mounting mid-lookup awaits the
+// same whoami instead of opening with the default display slug.
+let identityPromise: Promise<void> | null = null;
+function ensureCollabIdentity(): Promise<void> {
+  identityPromise ??= (async () => {
+    try {
+      const me = await whoami();
+      const name = me.name ?? me.email ?? me.userId;
+      if (name) setCollabDisplayName(name);
+    } catch {
+      // Anonymous is fine — tooltips fall back to "someone".
+    }
+  })();
+  return identityPromise;
 }
 import { redlineExtension } from "./collab-redline.ts";
 import type { CollabEditorApi } from "./collab-editor-api.ts";
