@@ -70,6 +70,57 @@ export interface TasksProject {
    * Synchronous on purpose so calls pipeline through it.
    */
   checkout(checkoutId: string, repoPath?: string): TasksCheckout;
+  /** PoC: the checkout AS a platform workspace — one capability carrying the
+   * collaborative session lane (open/push/wait, rebase model, no Yjs) and the
+   * board lane (files/status/commit/log; the overlay is the only diff). */
+  workspace(checkoutId: string, repoPath?: string): TasksWorkspace;
+}
+
+// The collab wire, shared verbatim by the vessel and the browser client —
+// mirrors the platform engine's contracts (collab-engine.ts).
+export type CollabOpened = { content: string; epoch: string; version: number };
+export type CollabAcceptResult =
+  | { status: "accepted"; version: number }
+  | { status: "epoch-mismatch"; epoch: string }
+  | { status: "history-miss" }
+  | { status: "too-large"; maxBytes: number };
+export type CollabWaitResult =
+  | { ops: { changes: unknown; clientId: string }[]; status: "ops" }
+  | { snapshot: { content: string; epoch: string; version: number }; status: "snapshot" }
+  /** The session was durably ended (deleted/replaced/reset) — reopen to resume. */
+  | { status: "ended" };
+
+export type CollabChangeSegment =
+  | { clientId: string; from: number; kind: "inserted"; to: number }
+  | { at: number; clientId: string; kind: "deleted"; text: string };
+
+export type CollabChanges = {
+  baseVersion: number;
+  headVersion: number;
+  segments: CollabChangeSegment[];
+};
+
+export interface TasksWorkspace {
+  open(filePath: string): Promise<CollabOpened>;
+  /** The mount content at HEAD — what uncommitted work diffs against. */
+  readBase(filePath: string): Promise<string | null>;
+  /** Attributed tracked changes since the last commit (redline segments). */
+  changes(filePath: string): Promise<CollabChanges>;
+  push(input: {
+    baseVersion: number;
+    clientId: string;
+    epoch: string;
+    ops: { changes: unknown; clientSeq: number }[];
+    path: string;
+  }): Promise<CollabAcceptResult>;
+  /** Long-poll: ops after a version (parking ~20s), or a snapshot past the floor. */
+  wait(filePath: string, epoch: string, afterVersion: number): Promise<CollabWaitResult>;
+  /** Every task file in the merged view (board seed). */
+  files(): Promise<Record<string, string>>;
+  // Git passthroughs stay platform-shaped; the pinned client predates them.
+  status(): Promise<unknown>;
+  commit(message: string): Promise<unknown>;
+  log(limit?: number): Promise<unknown>;
 }
 
 export type CheckoutSnapshot = {

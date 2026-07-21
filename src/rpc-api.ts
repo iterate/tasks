@@ -6,11 +6,16 @@ import type { CommitResult, TaskChangeSummary } from "./state.ts";
 import type {
   CheckoutIndexEntry,
   CheckoutSnapshot,
+  CollabAcceptResult,
+  CollabChanges,
+  CollabOpened,
+  CollabWaitResult,
   ProjectCredential,
   TasksApi,
   TasksCheckout,
   TasksProject,
   TasksUser,
+  TasksWorkspace,
 } from "./lib/tasks-api.ts";
 import { DEFAULT_REPO_PATH, isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
@@ -146,6 +151,20 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
     return new TasksCheckoutApi(this.#env, this.#projectId, this.#credential, checkoutId, normalized);
   }
 
+  /**
+   * The checkout AS a platform workspace (PoC hop (a): browser → vessel
+   * `/api` → workspace DO). `/workspaces/tasks/<checkoutId>` mounts the
+   * checkout's repo at `/` and is created lazily on first use; one capability
+   * carries both the collab session lane and the board lane.
+   */
+  workspace(checkoutId: string, repoPath: string = DEFAULT_REPO_PATH): TasksWorkspaceApi {
+    const normalized = normalizeRepoPath(repoPath);
+    if (!isCheckoutId(checkoutId) || normalized === null) {
+      throw new Error("bad checkout id or repo path");
+    }
+    return new TasksWorkspaceApi(this.#dial, checkoutId, normalized);
+  }
+
   [Symbol.dispose](): void {
     this.#dial.close();
   }
@@ -237,6 +256,139 @@ export class TasksCheckoutApi extends RpcTarget implements TasksCheckout {
       });
     await this.#seeded;
     return stub;
+  }
+}
+
+/** The platform workspace surface this vessel forwards to. The pinned
+ * `iterate` client types predate it, so the shape is asserted locally —
+ * capnweb stubs are Proxies, so unknown properties resolve at runtime. */
+type WorkspaceStub = {
+  create(input: {
+    mounts?: Record<string, { policy: string; repoPath: string }>;
+  }): Promise<unknown>;
+  collab: {
+    open(path: string): Promise<CollabOpened>;
+    push(input: {
+      baseVersion: number;
+      clientId: string;
+      epoch: string;
+      ops: { changes: unknown; clientSeq: number }[];
+      path: string;
+    }): Promise<CollabAcceptResult>;
+    wait(path: string, epoch: string, afterVersion: number): Promise<CollabWaitResult>;
+    changes(path: string): Promise<CollabChanges>;
+  };
+  readBase(path: string): Promise<string | null>;
+  glob(pattern: string): Promise<string[]>;
+  readFile(path: string): Promise<string | null>;
+  git: {
+    status(): Promise<unknown>;
+    commit(input: { message: string }): Promise<unknown>;
+    log(input?: { limit?: number }): Promise<unknown>;
+  };
+};
+
+/** Reads on the board seed run concurrently, but never unbounded — a big
+ * repo must not turn one board load into thousands of parallel DO calls. */
+const BOARD_READ_CONCURRENCY = 8;
+
+/**
+ * The checkout AS a platform workspace, forwarded over the vessel's live
+ * dial. Stateless beyond the dial (versions/epochs live in the workspace DO),
+ * lazily created on first use, and carrying both lanes: the collaborative
+ * session wire and the board (files/status/commit — the overlay IS the diff,
+ * no base snapshot anywhere; live sessions settle inside the workspace's own
+ * barriers).
+ */
+export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
+  readonly #dial: ProjectDial;
+  readonly #checkoutId: string;
+  readonly #repoPath: string;
+  #created = false;
+
+  constructor(dial: ProjectDial, checkoutId: string, repoPath: string) {
+    super();
+    this.#dial = dial;
+    this.#checkoutId = checkoutId;
+    this.#repoPath = repoPath;
+  }
+
+  async #withWorkspace<T>(operation: (ws: WorkspaceStub) => Promise<T>): Promise<T> {
+    return this.#dial.withProject(async (project) => {
+      const workspaces = (
+        project as unknown as { workspaces: { get(path: string): WorkspaceStub } }
+      ).workspaces;
+      const ws = workspaces.get(`/workspaces/tasks/${this.#checkoutId}`);
+      try {
+        return await operation(ws);
+      } catch (error) {
+        if (this.#created || !/does not exist/.test(errorText(error))) throw error;
+        await ws.create({
+          mounts: { "/": { policy: "commit-to-main", repoPath: this.#repoPath } },
+        });
+        this.#created = true;
+        return await operation(ws);
+      }
+    });
+  }
+
+  open(filePath: string): Promise<CollabOpened> {
+    return this.#withWorkspace((ws) => ws.collab.open(filePath));
+  }
+
+  readBase(filePath: string): Promise<string | null> {
+    return this.#withWorkspace((ws) => ws.readBase(filePath));
+  }
+
+  changes(filePath: string): Promise<CollabChanges> {
+    return this.#withWorkspace((ws) => ws.collab.changes(filePath));
+  }
+
+  push(input: {
+    baseVersion: number;
+    clientId: string;
+    epoch: string;
+    ops: { changes: unknown; clientSeq: number }[];
+    path: string;
+  }): Promise<CollabAcceptResult> {
+    return this.#withWorkspace((ws) => ws.collab.push(input));
+  }
+
+  wait(filePath: string, epoch: string, afterVersion: number): Promise<CollabWaitResult> {
+    return this.#withWorkspace((ws) => ws.collab.wait(filePath, epoch, afterVersion));
+  }
+
+  /** Every task file in the merged view, path → content (board seed).
+   * PoC shape: fine for boards of hundreds; the real fix for gigantic repos
+   * is a platform-side filtered snapshot (the workspace equivalent of the
+   * repo DO's listTaskFiles, which exists precisely because glob+read-each
+   * overloads the DO). */
+  async files(): Promise<Record<string, string>> {
+    return this.#withWorkspace(async (ws) => {
+      const paths = await ws.glob("**/tasks/**/*.md");
+      const entries: [string, string][] = [];
+      for (let index = 0; index < paths.length; index += BOARD_READ_CONCURRENCY) {
+        const chunk = paths.slice(index, index + BOARD_READ_CONCURRENCY);
+        entries.push(
+          ...(await Promise.all(
+            chunk.map(async (path) => [path, (await ws.readFile(path)) ?? ""] as [string, string]),
+          )),
+        );
+      }
+      return Object.fromEntries(entries);
+    });
+  }
+
+  status(): Promise<unknown> {
+    return this.#withWorkspace((ws) => ws.git.status());
+  }
+
+  commit(message: string): Promise<unknown> {
+    return this.#withWorkspace((ws) => ws.git.commit({ message }));
+  }
+
+  log(limit = 5): Promise<unknown> {
+    return this.#withWorkspace((ws) => ws.git.log({ limit }));
   }
 }
 

@@ -122,7 +122,7 @@ function dialTasksApi() {
 
 let liveApi: ReturnType<typeof dialTasksApi> | null = null;
 
-async function withProject<T>(
+export async function withProject<T>(
   operation: (project: ReturnType<typeof dialTasksApi>["project"]) => PromiseLike<T>,
 ): Promise<T> {
   liveApi ??= dialTasksApi();
