@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { ListTodoIcon, PlusIcon } from "lucide-react";
 import { newCheckoutId } from "../lib/checkout-shared.ts";
+import { CheckoutBreadcrumbs } from "../components/checkout-header.tsx";
 import { Button } from "../ui/button.tsx";
 import { SidebarTrigger } from "../ui/sidebar.tsx";
 
@@ -15,9 +16,10 @@ function Home() {
   const navigate = useNavigate();
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex shrink-0 items-center gap-2 border-b bg-background px-2 py-1.5">
-        <SidebarTrigger className="-ml-0.5" />
-      </div>
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
+        <SidebarTrigger className="-ml-1" />
+        <CheckoutBreadcrumbs />
+      </header>
       <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-muted/30 p-8 text-center">
         <ListTodoIcon aria-hidden className="size-8 text-muted-foreground/60" />
         <div>

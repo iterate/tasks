@@ -4,15 +4,17 @@ import type YProvider from "y-partyserver/provider";
 import { localCollabUser, renameCollabUser } from "../lib/use-checkout.ts";
 import type { TasksUser } from "../lib/tasks-api.ts";
 import type { Peer } from "../lib/board-model.ts";
+import { Avatar, AvatarFallback } from "../ui/avatar.tsx";
 import { Button } from "../ui/button.tsx";
+import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 
 /**
- * You + everyone else in the checkout. Chips show the verified identity
- * when the platform provided one — hover for email, userId, and what the
- * person has open (the OS stream-processor presence vocabulary). Click your
- * own chip to override the display name.
+ * Everyone in the checkout as overlapping avatars, the apps/os
+ * stream-processor way: initials in the collaborator's color, hover reveals
+ * name, email, userId, and what they have open. Your own avatar comes
+ * first — click it to override the display name.
  */
-export function PresenceStrip({
+export function PresenceAvatars({
   provider,
   peers,
   me,
@@ -26,33 +28,83 @@ export function PresenceStrip({
   );
   if (self === null) return null;
   const selfName = me?.name ?? me?.email ?? self.name;
-  const selfTitle = presenceTitle("You — click to rename", me?.email, me?.userId, null);
   return (
-    <span className="flex items-center gap-1">
-      <button
-        type="button"
-        title={selfTitle}
+    <span className="flex items-center -space-x-1.5">
+      <PresenceAvatar
+        name={selfName}
+        color={self.color}
+        email={me?.email ?? null}
+        userId={me?.userId ?? null}
+        openPath={null}
+        hint="You — click to rename"
         onClick={() => {
           const name = window.prompt("Your collaborator name", selfName);
           if (name?.trim()) setSelf(renameCollabUser(provider, name));
         }}
-        className="rounded-full border bg-transparent px-2 py-0.5 text-[11px]"
-        style={{ color: self.color, borderColor: `${self.color}66` }}
-      >
-        {selfName}
-      </button>
+      />
       {peers.map((peer) => (
-        <span
+        <PresenceAvatar
           key={peer.id}
-          title={presenceTitle(peer.user.name, peer.email, peer.userId, peer.openPath)}
-          className="rounded-full border px-2 py-0.5 text-[11px]"
-          style={{ color: peer.user.color, borderColor: `${peer.user.color}66` }}
-        >
-          {peer.user.name}
-        </span>
+          name={peer.user.name}
+          color={peer.user.color}
+          email={peer.email ?? null}
+          userId={peer.userId ?? null}
+          openPath={peer.openPath}
+        />
       ))}
     </span>
   );
+}
+
+function PresenceAvatar({
+  name,
+  color,
+  email,
+  userId,
+  openPath,
+  hint,
+  onClick,
+}: {
+  name: string;
+  color: string;
+  email: string | null;
+  userId: string | null;
+  openPath: string | null;
+  hint?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={<button type="button" onClick={onClick} className="rounded-full" />}
+      >
+        <Avatar className="size-6 ring-2 ring-background">
+          <AvatarFallback
+            className="text-[10px] font-semibold"
+            style={{ backgroundColor: `${color}26`, color }}
+          >
+            {initials(name)}
+          </AvatarFallback>
+        </Avatar>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="flex flex-col gap-0.5">
+        <span className="font-medium">{name}</span>
+        {email === null ? null : <span className="text-muted-foreground">{email}</span>}
+        {userId === null ? null : (
+          <span className="font-mono text-[10px] text-muted-foreground">{userId}</span>
+        )}
+        {openPath === null ? null : (
+          <span className="text-muted-foreground">editing {openPath}</span>
+        )}
+        {hint === undefined ? null : <span className="text-muted-foreground">{hint}</span>}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return `${parts[0]?.[0] ?? "?"}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
 export function ShareLink() {
@@ -78,17 +130,4 @@ export function ShareLink() {
       {copied ? "Copied" : "Share"}
     </Button>
   );
-}
-
-function presenceTitle(
-  name: string,
-  email: string | null | undefined,
-  userId: string | null | undefined,
-  openPath: string | null,
-): string {
-  const lines = [name];
-  if (email) lines.push(email);
-  if (userId) lines.push(userId);
-  if (openPath) lines.push(`editing ${openPath}`);
-  return lines.join("\n");
 }

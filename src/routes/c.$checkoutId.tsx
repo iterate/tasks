@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
-import { SearchIcon, Settings2Icon } from "lucide-react";
+import { Settings2Icon } from "lucide-react";
 import {
   DEFAULT_REPO_PATH,
   applyTextEdit,
@@ -43,7 +43,8 @@ import { useRecentTouches, type RecentTouch } from "../lib/recency.ts";
 import { Board } from "../components/board.tsx";
 import { TaskSheet } from "../components/task-sheet.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
-import { PresenceStrip, ShareLink } from "../components/presence.tsx";
+import { PresenceAvatars, ShareLink } from "../components/presence.tsx";
+import { CheckoutBreadcrumbs, FilterControl } from "../components/checkout-header.tsx";
 import { Input } from "../ui/input.tsx";
 import {
   Select,
@@ -172,20 +173,22 @@ function CheckoutPage() {
           disconnected={status === "disconnected"}
         />
       ) : (
-        <div className="flex flex-col gap-3 p-4">
-          <div className="flex items-center gap-2">
-            <SidebarTrigger />
-            <span className="font-mono text-xs text-muted-foreground">{checkoutId}</span>
+        <div className="flex flex-col gap-3">
+          <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
+            <SidebarTrigger className="-ml-1" />
+            <CheckoutBreadcrumbs repoPath={repoPath} checkoutId={checkoutId} />
+          </header>
+          <div className="flex flex-col gap-3 p-4">
+            <Skeleton className="h-8 w-64" />
+            <div className="flex gap-2">
+              <Skeleton className="h-40 w-72" />
+              <Skeleton className="h-40 w-72" />
+              <Skeleton className="h-40 w-72" />
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {status === "disconnected" ? "disconnected — retrying…" : "opening the checkout…"}
+            </p>
           </div>
-          <Skeleton className="h-8 w-64" />
-          <div className="flex gap-2">
-            <Skeleton className="h-40 w-72" />
-            <Skeleton className="h-40 w-72" />
-            <Skeleton className="h-40 w-72" />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {status === "disconnected" ? "disconnected — retrying…" : "opening the checkout…"}
-          </p>
         </div>
       )}
     </div>
@@ -382,49 +385,38 @@ function ReadyCheckout({
 
   return (
     <>
-      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background px-2 py-1.5">
-        <SidebarTrigger className="-ml-0.5" />
-        <div className="relative min-w-0 flex-1 sm:max-w-64">
-          <SearchIcon
-            aria-hidden
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            value={filter}
-            onChange={(event) => setFilter(event.currentTarget.value)}
-            placeholder="Filter tasks"
-            aria-label="Filter tasks"
-            className="h-8 pl-8 text-sm"
-          />
+      <header className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
+        <SidebarTrigger className="-ml-1" />
+        <CheckoutBreadcrumbs repoPath={repoPath} checkoutId={checkoutId} />
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <PresenceAvatars provider={provider} peers={peers} me={me} />
+          <ShareLink />
         </div>
+      </header>
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b bg-background px-3">
+        <FilterControl value={filter} onChange={setFilter} />
+        <Select
+          items={[
+            { label: "Group: folder", value: "folder" },
+            { label: "No grouping", value: "none" },
+          ]}
+          value={rowField ?? "none"}
+          onValueChange={(value) => setRowField(value === "folder" ? "folder" : null)}
+        >
+          <SelectTrigger aria-label="Board grouping" size="sm" className="h-8 w-fit gap-1.5 text-xs">
+            <Settings2Icon aria-hidden className="size-3.5 text-muted-foreground" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="folder">Group: folder</SelectItem>
+            <SelectItem value="none">No grouping</SelectItem>
+          </SelectContent>
+        </Select>
         <span className="hidden text-xs tabular-nums whitespace-nowrap text-muted-foreground md:inline">
           {filteredTasks.length}/{tasks.length} tasks
           {baseCommit ? <> · {baseCommit.slice(0, 7)}</> : null}
         </span>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <PresenceStrip provider={provider} peers={peers} me={me} />
-          <ShareLink />
-          <Select
-            items={[
-              { label: "Group: folder", value: "folder" },
-              { label: "No grouping", value: "none" },
-            ]}
-            value={rowField ?? "none"}
-            onValueChange={(value) => setRowField(value === "folder" ? "folder" : null)}
-          >
-            <SelectTrigger
-              aria-label="Board grouping"
-              size="sm"
-              className="h-8 w-fit gap-1.5 text-xs"
-            >
-              <Settings2Icon aria-hidden className="size-3.5 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="folder">Group: folder</SelectItem>
-              <SelectItem value="none">No grouping</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <CommitControls
             taskChanges={taskChanges}
             commitMessage={commit.commitMessage}
