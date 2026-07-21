@@ -26,7 +26,7 @@ describe("projectBoard", () => {
     make("tasks/a.md", "state: todo\ntags:\n  - alpha\n  - beta", "# Alpha beta task"),
     make("tasks/b.md", "state: done\ntags:\n  - alpha", "# Alpha task"),
     make("tasks/c.md", "state: todo", "# Untagged"),
-    make("tasks/sub/d.md", "state: todo", "# Nested"),
+    make("sub/tasks/d.md", "state: todo", "# Nested"),
   ];
 
   it("duplicates multi-tag cards across their tag rows; untagged trail in No tag", () => {
@@ -54,7 +54,7 @@ describe("projectBoard", () => {
 
   it("groups by folder with the root row first", () => {
     const projection = projectBoard({ tasks, filter: "", rowField: "folder" });
-    expect(projection.rows.map((row) => row.label)).toEqual(["/", "/sub"]);
+    expect(projection.rows.map((row) => row.label)).toEqual(["/", "sub"]);
   });
 
   it("renders one flat row without grouping", () => {

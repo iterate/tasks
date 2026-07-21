@@ -245,7 +245,9 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         lane((ws) => ws.files()),
         lane((ws) => ws.status()),
       ]);
-      setFiles(seeded);
+      // Same key normalization as the seed — mixed-shape keys would orphan
+      // badges and duplicate cards after the first commit.
+      setFiles(Object.fromEntries(Object.entries(seeded).map(([path, c]) => [boardKey(path), c])));
       setChanges(changeMap(status));
       return result;
     },

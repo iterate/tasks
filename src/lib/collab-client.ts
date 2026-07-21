@@ -5,7 +5,7 @@ import {
   sendableUpdates,
   type Update,
 } from "@codemirror/collab";
-import { ChangeSet, Text, type Extension } from "@codemirror/state";
+import { ChangeSet, type Extension } from "@codemirror/state";
 import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
 import { withProject } from "./use-checkout.ts";
 import type { CollabChanges, CollabWaitResult, TasksWorkspace } from "./tasks-api.ts";
@@ -17,7 +17,21 @@ import type { CollabChanges, CollabWaitResult, TasksWorkspace } from "./tasks-ap
  * authority; this client optimistically applies local edits and rebases
  * unconfirmed ones over every delivered batch.
  */
-const freshClientId = () => `web-${Math.random().toString(36).slice(2, 10)}`;
+const slugify = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 24) || "someone";
+
+let displaySlug = "someone";
+/** Redline tooltips say WHO — the display name rides inside the client id
+ * (`u-<slug>-<rand>`), set once identity is known. */
+export function setCollabDisplayName(name: string): void {
+  displaySlug = slugify(name);
+}
+
+const freshClientId = () => `u-${displaySlug}-${Math.random().toString(36).slice(2, 8)}`;
 
 export class CollabConnection {
   clientId = freshClientId();
@@ -26,7 +40,6 @@ export class CollabConnection {
   confirmed = 0;
   /** Fold of confirmed ops only — the reseed baseline for carrying
    * unconfirmed local edits across a snapshot re-sync. */
-  synced = Text.empty;
   onStatus: (status: string) => void = () => {};
   /** Set by the surface: rebuild the editor from a server snapshot. The
    * second argument is the text of genuinely UNACKED local edits (null when
@@ -49,10 +62,11 @@ export class CollabConnection {
   }
 
   async open(): Promise<{ content: string; version: number }> {
+    // Identity first: the client id embeds the display name for attribution.
+    this.clientId = freshClientId();
     const opened = await withProject((project) => this.#lane(project).open(this.filePath));
     this.epoch = opened.epoch;
     this.confirmed = 0;
-    this.synced = Text.of(opened.content.split("\n"));
     return opened;
   }
 
@@ -82,10 +96,6 @@ export class CollabConnection {
     return withProject((project) => this.#lane(project).changes(this.filePath));
   }
 
-  async readBase(): Promise<string | null> {
-    return withProject((project) => this.#lane(project).readBase(this.filePath));
-  }
-
   /** Fold delivered ops into the confirmed baseline and count own ones. */
   absorb(ops: { changes: unknown; clientId: string }[]): Update[] {
     this.confirmed += ops.filter((op) => op.clientId === this.clientId).length;
@@ -93,7 +103,6 @@ export class CollabConnection {
       changes: ChangeSet.fromJSON(op.changes),
       clientID: op.clientId,
     }));
-    for (const update of updates) this.synced = update.changes.apply(this.synced);
     return updates;
   }
 
@@ -106,7 +115,6 @@ export class CollabConnection {
     // the server has already acked the old (clientId, seq) pairs — reusing
     // them would silently drop every carried edit.
     this.clientId = freshClientId();
-    this.synced = Text.of(snapshot.content.split("\n"));
   }
 
 }
@@ -122,6 +130,11 @@ export function peerExtension(connection: CollabConnection, startVersion: number
       pushing = false;
       done = false;
       failures = 0;
+      /** Set on epoch-mismatch/history-miss: the pull loop's snapshot lane
+       * owns recovery, and re-pushing before the reseed just spams a
+       * rejection the server already gave. The reseed rebuilds the editor
+       * (fresh plugin), so the flag's life ends with the stale state. */
+      recovering = false;
 
       constructor(readonly view: EditorView) {
         void this.pull();
@@ -132,7 +145,7 @@ export function peerExtension(connection: CollabConnection, startVersion: number
       }
 
       async push(): Promise<void> {
-        if (this.pushing || this.done) return;
+        if (this.pushing || this.done || this.recovering) return;
         const updates = sendableUpdates(this.view.state);
         if (updates.length === 0) return;
         this.pushing = true;
@@ -150,7 +163,7 @@ export function peerExtension(connection: CollabConnection, startVersion: number
               return;
             case "epoch-mismatch":
             case "history-miss":
-              // The pull loop's snapshot lane owns recovery.
+              this.recovering = true;
               break;
           }
         } catch (error) {
@@ -160,7 +173,7 @@ export function peerExtension(connection: CollabConnection, startVersion: number
         }
         this.pushing = false;
         // Anything typed while the push was in flight goes in the next batch.
-        if (!this.done && sendableUpdates(this.view.state).length > 0) {
+        if (!this.done && !this.recovering && sendableUpdates(this.view.state).length > 0) {
           setTimeout(() => void this.push(), 120);
         }
       }

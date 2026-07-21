@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { unifiedMergeView } from "@codemirror/merge";
-import { CollabConnection, peerExtension } from "./collab-client.ts";
+import { CollabConnection, peerExtension, setCollabDisplayName } from "./collab-client.ts";
+import { whoami } from "./use-checkout.ts";
+
+let identityLoaded = false;
+async function ensureCollabIdentity(): Promise<void> {
+  if (identityLoaded) return;
+  identityLoaded = true;
+  try {
+    const me = await whoami();
+    const name = me.name ?? me.email ?? me.userId;
+    if (name) setCollabDisplayName(name);
+  } catch {
+    // Anonymous is fine — tooltips fall back to "someone".
+  }
+}
 import { redlineExtension } from "./collab-redline.ts";
 
 /**
@@ -25,6 +38,9 @@ export function useCollabEditor(input: {
   extensions: Extension;
   /** Redline layers on at build time (kept in sync with toggle()). */
   redline: boolean;
+  /** Place the caret on mount: select the `# headline` text (so typing
+   * replaces it — the new-task flow) or park at its end. */
+  focusHeadline?: "select" | "end";
   onLiveContent?: (path: string, content: string) => void;
   onStatus?: (status: string) => void;
 }) {
@@ -33,7 +49,7 @@ export function useCollabEditor(input: {
   const [recovery, setRecovery] = useState<string | null>(null);
   const redlineRef = useRef(input.redline);
   const toggleRef = useRef<((on: boolean) => void) | null>(null);
-  const { checkoutId, repoPath, path, extensions, onLiveContent, onStatus } = input;
+  const { checkoutId, repoPath, path, extensions, onLiveContent, onStatus, focusHeadline } = input;
   // Ref writes never happen during render — React may replay render work.
   useEffect(() => {
     redlineRef.current = input.redline;
@@ -54,12 +70,9 @@ export function useCollabEditor(input: {
     let view: EditorView | null = null;
     let cancelled = false;
 
-    const redlineExtensions = async (): Promise<Extension> => {
-      // ONE baseline for both layers — changes() carries the content the
-      // attribution folded from, so merge chunks and author marks agree.
-      const changes = await connection.changes();
-      return [unifiedMergeView({ original: changes.baseContent }), redlineExtension(connection)];
-    };
+    // Redlines are the attribution layer only: added-text highlights,
+    // deletion markers, who/when tooltips. No merge chunks, no accept/reject.
+    const redlineExtensions = async (): Promise<Extension> => redlineExtension(connection);
 
     let reflectTimer: ReturnType<typeof setTimeout> | null = null;
     const liveReflector =
@@ -104,8 +117,8 @@ export function useCollabEditor(input: {
       setStatus(`re-synced · v${snapshot.version}`);
     };
 
-    void connection
-      .open()
+    void ensureCollabIdentity()
+      .then(() => connection.open())
       .then(async (opened) => {
         if (cancelled || host.current === null) return;
         const layers = redlineRef.current ? await redlineExtensions() : [];
@@ -114,6 +127,19 @@ export function useCollabEditor(input: {
           parent: host.current,
           state: buildState(opened.content, opened.version, layers),
         });
+        if (focusHeadline !== undefined) {
+          const heading = /^#\s+(.*)$/m.exec(opened.content);
+          if (heading !== null) {
+            const end = heading.index + heading[0].length;
+            const start = end - (heading[1]?.length ?? 0);
+            view.dispatch({
+              scrollIntoView: true,
+              selection:
+                focusHeadline === "select" ? { anchor: start, head: end } : { anchor: end },
+            });
+          }
+          view.focus();
+        }
         setStatus(`live · v${opened.version}`);
       })
       .catch((cause: unknown) =>
@@ -125,7 +151,7 @@ export function useCollabEditor(input: {
       toggleRef.current = null;
       view?.destroy();
     };
-  }, [checkoutId, repoPath, path, extensions, onLiveContent, setStatus]);
+  }, [checkoutId, repoPath, path, extensions, onLiveContent, setStatus, focusHeadline]);
 
   return {
     dismissRecovery: () => setRecovery(null),

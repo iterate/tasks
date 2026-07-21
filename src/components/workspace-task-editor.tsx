@@ -13,6 +13,7 @@ export function WorkspaceTaskEditor({
   repoPath,
   path,
   redline,
+  focusHeadline,
   onLiveContent,
   onStatus,
 }: {
@@ -20,6 +21,7 @@ export function WorkspaceTaskEditor({
   repoPath: string;
   path: string;
   redline: boolean;
+  focusHeadline?: "select" | "end";
   onLiveContent: (path: string, content: string) => void;
   onStatus?: (status: string) => void;
 }) {
@@ -39,6 +41,7 @@ export function WorkspaceTaskEditor({
   const editor = useCollabEditor({
     checkoutId,
     extensions,
+    focusHeadline,
     onLiveContent,
     onStatus,
     path,

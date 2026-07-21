@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SidebarTrigger } from "../ui/sidebar.tsx";
 import { Board } from "../components/board.tsx";
 import {
@@ -18,15 +18,17 @@ import { WorkspaceTaskSheet } from "../components/workspace-task-sheet.tsx";
 import { useWorkspaceBoard } from "../lib/use-workspace-board.ts";
 import { useTaskCommit } from "../lib/use-task-commit.ts";
 import { projectBoard } from "../lib/board-engine.ts";
-import type { BoardTask, RowField } from "../lib/board-model.ts";
+import { taskPathInFolder, type BoardTask, type RowField } from "../lib/board-model.ts";
 import { DEFAULT_REPO_PATH, normalizeRepoPath } from "../lib/checkout-shared.ts";
 import {
   columnsForTasks,
   fallbackCommitMessage,
+  isTaskFilePath,
   newTaskFile,
   setTaskCardLabels,
   setTaskCardState,
   taskColumnState,
+  taskPathForTitle,
 } from "../tasks-model.ts";
 
 /**
@@ -57,8 +59,16 @@ function WorkspaceBoardPage() {
   const navigate = useNavigate({ from: Route.fullPath });
   const repoPath = normalizeRepoPath(search.repo) ?? DEFAULT_REPO_PATH;
   const board = useWorkspaceBoard(checkoutId, repoPath);
-  const [autoCommit, setAutoCommit] = useState(true);
+  // Auto-commit defaults OFF on the workspace board: every commit advances
+  // the redline baseline, and a 60s autosave would wipe "what everyone did"
+  // minute by minute. Committing is an explicit act here.
+  const [autoCommit, setAutoCommit] = useState(false);
   const [eventsOpen, setEventsOpen] = useState(false);
+  // A just-created task: the editor opens with the headline selected and the
+  // filename trails the title until the first commit (same UX as the Yjs
+  // board).
+  const [draftPath, setDraftPath] = useState<string | null>(null);
+  const renamedDraftRef = useRef(false);
   const [commitPending, setCommitPending] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
 
@@ -126,9 +136,7 @@ function WorkspaceBoardPage() {
         board.writeTask(task.path, source);
         return;
       }
-      const name = task.path.split("/").at(-1)!;
-      const prefix = task.path.slice(0, task.path.indexOf("tasks/") + "tasks/".length);
-      const nextPath = folder === "/" ? `${prefix}${name}` : `${prefix}${folder}/${name}`;
+      const nextPath = taskPathInFolder(task.path, folder);
       board.writeTask(nextPath, source);
       board.deleteTask(task.path);
       if (search.task === task.path) patchSearch({ task: nextPath });
@@ -139,12 +147,54 @@ function WorkspaceBoardPage() {
   const addTask = useCallback(
     (state: string, folder: string | null) => {
       const file = newTaskFile({ state, title: "New task" });
-      const name = file.path.split("/").at(-1)!;
-      const target = folder === null || folder === "/" ? `tasks/${name}` : `tasks/${folder}/${name}`;
+      const target = taskPathInFolder(file.path, folder ?? "/");
       board.writeTask(target, file.content);
+      renamedDraftRef.current = false;
+      setDraftPath(target);
       patchSearch({ task: target });
     },
     [board, patchSearch],
+  );
+
+  // While the draft's sheet is open and it is still an uncommitted add, its
+  // filename trails the headline (debounced so half-typed titles don't churn
+  // paths).
+  useEffect(() => {
+    if (draftPath === null || search.task !== draftPath) return;
+    if (board.changes.get(draftPath) !== "added") return;
+    const task = board.tasks.find((candidate) => candidate.path === draftPath);
+    if (task === undefined) return;
+    const target = taskPathInFolder(taskPathForTitle(task.title), task.folder);
+    if (target === draftPath || board.files?.[target] !== undefined) return;
+    const timer = setTimeout(() => {
+      const source = board.files?.[draftPath];
+      if (source === undefined || board.files?.[target] !== undefined) return;
+      board.writeTask(target, source);
+      board.deleteTask(draftPath);
+      renamedDraftRef.current = true;
+      setDraftPath(target);
+      patchSearch({ task: target });
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [draftPath, search.task, board, patchSearch]);
+
+  // The sheet's path field: any rename the board can represent is allowed —
+  // the file must stay a task (.md under a folder named "tasks").
+  const renameTask = useCallback(
+    (task: BoardTask, nextPathRaw: string): string | null => {
+      const nextPath = nextPathRaw.split("/").filter(Boolean).join("/");
+      if (nextPath === "") return "Path cannot be empty.";
+      if (!isTaskFilePath(nextPath))
+        return 'Path must be a .md file inside a folder named "tasks".';
+      if (nextPath === task.path) return null;
+      if (board.files?.[nextPath] !== undefined) return "A file already exists at that path.";
+      board.writeTask(nextPath, task.source);
+      board.deleteTask(task.path);
+      setDraftPath((current) => (current === task.path ? nextPath : current));
+      if (search.task === task.path) patchSearch({ task: nextPath });
+      return null;
+    },
+    [board, patchSearch, search.task],
   );
 
   return (
@@ -241,6 +291,14 @@ function WorkspaceBoardPage() {
           if (openTask !== null)
             board.writeTask(openTask.path, setTaskCardLabels(openTask.source, labels));
         }}
+        onRename={(nextPath) => (openTask === null ? null : renameTask(openTask, nextPath))}
+        focusHeadline={
+          openTask !== null && openTask.path === draftPath
+            ? renamedDraftRef.current
+              ? "end"
+              : "select"
+            : undefined
+        }
         onRevert={() => {
           if (openTask !== null) board.revertTask(openTask.path);
         }}

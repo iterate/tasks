@@ -1,11 +1,29 @@
 import { lazy, Suspense, useState } from "react";
-import { XIcon } from "lucide-react";
-import { Sheet, SheetContent, SheetTitle } from "../ui/sheet.tsx";
+import { RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { Input } from "../ui/input.tsx";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../ui/sheet.tsx";
 import { Button } from "../ui/button.tsx";
-import { Badge } from "../ui/badge.tsx";
-import { cn } from "../ui/utils.ts";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../ui/alert-dialog.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { stateLabel, type BoardTask } from "../lib/board-model.ts";
+import { TaskStateIcon } from "./board.tsx";
 import { TagPicker } from "./tag-picker.tsx";
 
 // The editor stack (CM6 + collab + merge) loads only when a sheet opens.
@@ -27,6 +45,8 @@ export function WorkspaceTaskSheet({
   columns,
   allTags,
   changeStatus,
+  onRename,
+  focusHeadline,
   onLiveContent,
   onChangeState,
   onChangeLabels,
@@ -40,6 +60,9 @@ export function WorkspaceTaskSheet({
   columns: string[];
   allTags: string[];
   changeStatus: TaskChangeStatus | undefined;
+  /** Rename the task file; returns an error message or null on success. */
+  onRename: (nextPath: string) => string | null;
+  focusHeadline?: "select" | "end";
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
   onChangeLabels: (labels: string[]) => void;
@@ -62,12 +85,13 @@ export function WorkspaceTaskSheet({
             columns={columns}
             allTags={allTags}
             changeStatus={changeStatus}
+            onRename={onRename}
+            focusHeadline={focusHeadline}
             onLiveContent={onLiveContent}
             onChangeState={onChangeState}
             onChangeLabels={onChangeLabels}
             onRevert={onRevert}
             onDelete={onDelete}
-            onClose={onClose}
           />
         )}
       </SheetContent>
@@ -82,12 +106,13 @@ function SheetBody({
   columns,
   allTags,
   changeStatus,
+  onRename,
+  focusHeadline,
   onLiveContent,
   onChangeState,
   onChangeLabels,
   onRevert,
   onDelete,
-  onClose,
 }: {
   task: BoardTask;
   checkoutId: string;
@@ -95,66 +120,136 @@ function SheetBody({
   columns: string[];
   allTags: string[];
   changeStatus: TaskChangeStatus | undefined;
+  /** Rename the task file; returns an error message or null on success. */
+  onRename: (nextPath: string) => string | null;
+  focusHeadline?: "select" | "end";
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
   onChangeLabels: (labels: string[]) => void;
   onRevert: () => void;
   onDelete: () => void;
-  onClose: () => void;
 }) {
-  const [redline, setRedline] = useState(false);
   const [status, setStatus] = useState("connecting…");
+  // The path is editable in place; SheetBody is keyed by task.path, so a
+  // successful rename remounts with the fresh path and clean state.
+  const [pathDraft, setPathDraft] = useState(task.path);
+  const [pathError, setPathError] = useState<string | null>(null);
+  const commitPath = () => {
+    if (pathDraft === task.path) {
+      setPathError(null);
+      return;
+    }
+    setPathError(onRename(pathDraft));
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center gap-2 border-b px-4 py-3">
-        <SheetTitle className="min-w-0 flex-1 truncate text-base">{task.title}</SheetTitle>
-        {changeStatus !== undefined && (
-          <Badge
-            variant="outline"
-            className={cn(
-              "capitalize",
-              changeStatus === "added" && "border-emerald-300 text-emerald-700",
-              changeStatus === "modified" && "border-amber-300 text-amber-700",
-            )}
-          >
-            {changeStatus}
-          </Badge>
-        )}
-        <select
-          className="h-8 rounded-md border bg-transparent px-2 text-sm"
-          value={columns.includes(task.state) ? task.state : columns[0]}
-          onChange={(event) => onChangeState(event.target.value)}
+      <SheetHeader className="shrink-0 gap-1 border-b pr-12">
+        <SheetTitle className="flex items-center gap-2 text-base">
+          <span className="truncate">{task.title}</span>
+          {changeStatus === "added" ? (
+            <span className="shrink-0 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-emerald-700 uppercase">
+              New
+            </span>
+          ) : changeStatus === "modified" ? (
+            <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-800 uppercase">
+              Edited
+            </span>
+          ) : null}
+        </SheetTitle>
+        <Input
+          value={pathDraft}
+          onChange={(event) => setPathDraft(event.target.value)}
+          onBlur={commitPath}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              commitPath();
+            }
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              setPathDraft(task.path);
+              setPathError(null);
+            }
+          }}
+          aria-invalid={pathError !== null}
+          aria-label="Task file path"
+          spellCheck={false}
+          className={
+            "h-6 border-transparent px-1 font-mono text-xs shadow-none " +
+            "hover:border-input focus-visible:border-input md:text-xs"
+          }
+        />
+        {pathError !== null && <p className="text-xs text-red-700">{pathError}</p>}
+      </SheetHeader>
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-1.5">
+        <Select
+          items={columns.map((state) => ({ label: stateLabel(state), value: state }))}
+          value={columnState(task, columns)}
+          onValueChange={(value) => {
+            if (typeof value === "string" && value !== "") onChangeState(value);
+          }}
         >
-          {columns.map((column) => (
-            <option key={column} value={column}>
-              {stateLabel(column)}
-            </option>
-          ))}
-        </select>
-        <Button
-          variant={redline ? "default" : "outline"}
-          size="sm"
-          onClick={() => setRedline((current) => !current)}
-        >
-          Changes
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onDelete}>
-          Delete
-        </Button>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <XIcon className="size-4" />
-        </Button>
-      </div>
-      <div className="flex items-center gap-2 border-b px-4 py-1 text-[11px] text-muted-foreground">
-        <span className="truncate font-mono">{task.path}</span>
+          <SelectTrigger aria-label="Task state" size="sm" className="w-36 shrink-0">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {columns.map((state) => (
+              <SelectItem key={state} value={state}>
+                <span className="flex items-center gap-2">
+                  <TaskStateIcon state={state} />
+                  {stateLabel(state)}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <TagPicker value={task.labels} options={allTags} onChange={onChangeLabels} />
-        {changeStatus !== undefined && (
-          <Button variant="ghost" size="sm" className="h-6 px-2 text-[11px]" onClick={onRevert}>
-            Revert
-          </Button>
-        )}
-        <span className="ml-auto font-mono">{status}</span>
+        <div className="ml-auto flex items-center gap-1">
+          <span className="font-mono text-[11px] text-muted-foreground">{status}</span>
+          {changeStatus === undefined ? null : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground"
+              title="Revert to the base commit's version"
+              onClick={onRevert}
+            >
+              <RotateCcwIcon aria-hidden className="size-3.5" />
+              Revert
+            </Button>
+          )}
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  title="Delete task"
+                />
+              }
+            >
+              <Trash2Icon aria-hidden className="size-3.5" />
+              Delete
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {task.title}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Removes {task.path} from the workspace. It stays restorable from the Deleted
+                  strip until someone commits.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" onClick={onDelete}>
+                  Delete task
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </div>
       <Suspense
         fallback={<p className="p-4 text-sm text-muted-foreground">Loading editor…</p>}
@@ -163,11 +258,18 @@ function SheetBody({
           checkoutId={checkoutId}
           repoPath={repoPath}
           path={task.path}
-          redline={redline}
+          redline={true}
+          focusHeadline={focusHeadline}
           onLiveContent={onLiveContent}
           onStatus={setStatus}
         />
       </Suspense>
     </div>
   );
+}
+
+function columnState(task: BoardTask, columns: string[]): string {
+  const literal = task.state.trim();
+  if (literal === "" || literal === "backlog") return "todo";
+  return columns.includes(literal) ? literal : "todo";
 }

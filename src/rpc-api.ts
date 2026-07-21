@@ -422,8 +422,13 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       // ONE batched platform call for the whole set — per-file reads through
       // this chain collapse at thousands of tasks.
       const contents = await ws.readFiles(paths);
+      // Keys leave here repo-relative (no leading slash) — one shape for
+      // every consumer; reads/writes prepend the platform slash themselves.
       return Object.fromEntries(
-        Object.entries(contents).map(([path, content]) => [path, content ?? ""]),
+        Object.entries(contents).map(([path, content]) => [
+          path.replace(/^\/+/, ""),
+          content ?? "",
+        ]),
       );
     });
   }

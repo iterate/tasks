@@ -1,15 +1,23 @@
-import { EditorView, Decoration, ViewPlugin, WidgetType, type DecorationSet, type ViewUpdate } from "@codemirror/view";
+import {
+  EditorView,
+  Decoration,
+  ViewPlugin,
+  WidgetType,
+  hoverTooltip,
+  type DecorationSet,
+  type Tooltip,
+  type ViewUpdate,
+} from "@codemirror/view";
 import { RangeSetBuilder } from "@codemirror/state";
-import { getSyncedVersion } from "@codemirror/collab";
+import { getSyncedVersion, sendableUpdates } from "@codemirror/collab";
 import type { CollabConnection } from "./collab-client.ts";
 import type { CollabChangeSegment } from "./tasks-api.ts";
 
 /**
- * The ATTRIBUTION layer of the redline view: author-colored marks over
- * inserted text and ⌫ flags where base text vanished, fed by the server's
- * `changes()` fold of the op log. Content-level struck-out deletions are
- * @codemirror/merge's job (composed alongside in the page); this layer only
- * answers "who".
+ * The redline layer: WHERE somebody added text (author-tinted highlight),
+ * a ⌫ marker WHERE something was deleted, and a hover tooltip saying WHO
+ * and WHEN (plus the deleted text on markers). Fed by the server's op-log
+ * fold; no accept/reject machinery — the document is the document.
  */
 
 /** Stable, legible per-author hue (agents get the platform violet). */
@@ -20,22 +28,46 @@ export function authorColor(clientId: string, alpha = 0.35): string {
   return `hsla(${((hash % 360) + 360) % 360}, 70%, 45%, ${alpha})`;
 }
 
+/** Human name for a change author: agents are "agent"; browser clients embed
+ * a display slug in their id (`u-<slug>-<rand>`); anything else is someone. */
+export function authorLabel(clientId: string): string {
+  if (clientId === "external") return "agent";
+  const named = /^u-(.+)-[a-z0-9]+$/.exec(clientId);
+  if (named) return named[1]!.replaceAll("-", " ");
+  return "someone";
+}
+
+function whenLabel(createdAt: number | undefined): string {
+  if (!createdAt) return "";
+  const delta = Date.now() - createdAt;
+  if (delta < 60_000) return "just now";
+  if (delta < 3_600_000) return `${Math.round(delta / 60_000)}m ago`;
+  return new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 class DeletionFlag extends WidgetType {
   constructor(
     readonly clientId: string,
     readonly text: string,
+    readonly createdAt: number | undefined,
   ) {
     super();
   }
   override eq(other: DeletionFlag) {
-    return other.clientId === this.clientId && other.text === this.text;
+    return (
+      other.clientId === this.clientId &&
+      other.text === this.text &&
+      other.createdAt === this.createdAt
+    );
   }
   toDOM() {
     const flag = document.createElement("span");
     flag.className = "cm-redline-del";
+    flag.dataset.author = this.clientId;
+    flag.dataset.when = String(this.createdAt ?? "");
+    flag.dataset.deleted = this.text.slice(0, 200);
     flag.style.color = authorColor(this.clientId, 1);
     flag.textContent = "⌫";
-    flag.title = `deleted by ${this.clientId}: "${this.text.slice(0, 120)}"`;
     return flag;
   }
 }
@@ -47,7 +79,9 @@ export function decorate(segments: CollabChangeSegment[], docLength: number): De
   // sort defensively, deletions before insertions at a tie.
   const ordered = [...segments].sort((left, right) => {
     const position = (segment: CollabChangeSegment) =>
-      segment.kind === "inserted" ? Math.min(segment.from, docLength) : Math.min(segment.at, docLength);
+      segment.kind === "inserted"
+        ? Math.min(segment.from, docLength)
+        : Math.min(segment.at, docLength);
     return (
       position(left) - position(right) ||
       (left.kind === "deleted" ? -1 : 0) - (right.kind === "deleted" ? -1 : 0)
@@ -56,7 +90,14 @@ export function decorate(segments: CollabChangeSegment[], docLength: number): De
   for (const segment of ordered) {
     if (segment.kind === "deleted") {
       const at = Math.min(segment.at, docLength);
-      builder.add(at, at, Decoration.widget({ side: -1, widget: new DeletionFlag(segment.clientId, segment.text) }));
+      builder.add(
+        at,
+        at,
+        Decoration.widget({
+          side: -1,
+          widget: new DeletionFlag(segment.clientId, segment.text, segment.createdAt),
+        }),
+      );
     } else {
       const from = Math.min(segment.from, docLength);
       const to = Math.min(segment.to, docLength);
@@ -66,8 +107,9 @@ export function decorate(segments: CollabChangeSegment[], docLength: number): De
         to,
         Decoration.mark({
           attributes: {
+            "data-author": segment.clientId,
+            "data-when": String(segment.createdAt ?? ""),
             style: `background: ${authorColor(segment.clientId, 0.18)}; border-bottom: 2px solid ${authorColor(segment.clientId, 0.9)}`,
-            title: `inserted by ${segment.clientId}`,
           },
           class: "cm-redline-ins",
         }),
@@ -75,6 +117,40 @@ export function decorate(segments: CollabChangeSegment[], docLength: number): De
     }
   }
   return builder.finish();
+}
+
+/** shadcn-tooltip-styled hover card: who, when, and (for markers) what. */
+function redlineHoverTooltip(): ReturnType<typeof hoverTooltip> {
+  return hoverTooltip((view, pos): Tooltip | null => {
+    const dom = view.domAtPos(pos);
+    const node = dom.node instanceof Element ? dom.node : dom.node.parentElement;
+    const marked = (node?.closest?.("[data-author]") ?? null) as HTMLElement | null;
+    if (!marked) return null;
+    const author = authorLabel(marked.dataset.author ?? "");
+    const when = whenLabel(Number(marked.dataset.when) || undefined);
+    const deleted = marked.dataset.deleted;
+    return {
+      above: true,
+      create: () => {
+        const card = document.createElement("div");
+        card.className = "cm-redline-tooltip";
+        const line = document.createElement("div");
+        line.textContent =
+          deleted !== undefined
+            ? `${author} deleted${when ? ` · ${when}` : ""}`
+            : `${author} added${when ? ` · ${when}` : ""}`;
+        card.appendChild(line);
+        if (deleted) {
+          const snippet = document.createElement("div");
+          snippet.className = "cm-redline-tooltip-snippet";
+          snippet.textContent = deleted;
+          card.appendChild(snippet);
+        }
+        return { dom: card };
+      },
+      pos,
+    };
+  });
 }
 
 const REFRESH_DEBOUNCE_MS = 500;
@@ -86,6 +162,7 @@ export function redlineExtension(connection: CollabConnection) {
       decorations: DecorationSet = Decoration.none;
       timer: ReturnType<typeof setTimeout> | null = null;
       done = false;
+      generation = 0;
 
       constructor(readonly view: EditorView) {
         void this.refresh();
@@ -99,8 +176,6 @@ export function redlineExtension(connection: CollabConnection) {
         this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
       }
 
-      generation = 0;
-
       async refresh() {
         if (this.done) return;
         const mine = ++this.generation;
@@ -108,9 +183,13 @@ export function redlineExtension(connection: CollabConnection) {
           const changes = await connection.changes();
           if (this.done || this.generation !== mine) return; // out-of-order
           // Segments are in CONFIRMED-head coordinates: install only when the
-          // editor is synced to that head; otherwise keep the current mapped
-          // decorations and try again once the versions agree.
-          if (changes.headVersion !== getSyncedVersion(this.view.state)) {
+          // editor is synced to that head AND has no unacked local ops (their
+          // doc positions aren't in the fold yet); otherwise keep the current
+          // mapped decorations and try again once the versions agree.
+          if (
+            changes.headVersion !== getSyncedVersion(this.view.state) ||
+            sendableUpdates(this.view.state).length > 0
+          ) {
             this.timer = setTimeout(() => void this.refresh(), REFRESH_DEBOUNCE_MS);
             return;
           }
@@ -123,7 +202,7 @@ export function redlineExtension(connection: CollabConnection) {
           this.view.dispatch({});
         } catch {
           // Attribution is decorative — a failed refresh just tries again on
-          // the next edit; the merge view still shows the content diff.
+          // the next edit.
         }
       }
 
@@ -134,10 +213,29 @@ export function redlineExtension(connection: CollabConnection) {
     },
     { decorations: (value) => value.decorations },
   );
-  return [plugin, theme];
+  return [plugin, redlineHoverTooltip(), theme];
 }
 
 const theme = EditorView.baseTheme({
   ".cm-redline-del": { cursor: "help", fontWeight: "bold", padding: "0 1px" },
   ".cm-redline-ins": { borderRadius: "2px" },
+  // shadcn tooltip dialect: primary bg, small radius, xs text.
+  ".cm-tooltip:has(.cm-redline-tooltip)": {
+    backgroundColor: "transparent",
+    border: "none",
+  },
+  ".cm-redline-tooltip": {
+    backgroundColor: "var(--primary, #18181b)",
+    borderRadius: "calc(var(--radius, 0.5rem) - 4px)",
+    color: "var(--primary-foreground, #fafafa)",
+    fontSize: "12px",
+    maxWidth: "320px",
+    padding: "6px 12px",
+  },
+  ".cm-redline-tooltip-snippet": {
+    marginTop: "4px",
+    opacity: "0.8",
+    textDecoration: "line-through",
+    whiteSpace: "pre-wrap",
+  },
 });

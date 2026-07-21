@@ -37,7 +37,9 @@ function lane(api) {
     const ws = api
       .authenticate({ type: "project-app-session", token })
       .projects.get(projectId)
-      .workspaces.get(`/workspaces/tasks/${checkoutId}`);
+      // Same id derivation as the vessel (checkoutId~repoSlug for
+      // /repos/config): both probe lanes must address ONE workspace DO.
+      .workspaces.get(`/workspaces/tasks/${checkoutId}~config`);
     return {
       open: () => ws.collab.open(FILE),
       push: (input) => ws.collab.push({ ...input, path: FILE }),

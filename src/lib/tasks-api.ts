@@ -91,17 +91,17 @@ export type CollabWaitResult =
   | { status: "ended" };
 
 export type CollabChangeSegment =
-  | { clientId: string; from: number; kind: "inserted"; to: number }
-  | { at: number; clientId: string; kind: "deleted"; text: string };
+  | { clientId: string; createdAt?: number; from: number; kind: "inserted"; to: number }
+  | { at: number; clientId: string; createdAt?: number; kind: "deleted"; text: string };
 
 /** Two plain arrays on the wire (a union array breaks the platform's
  * generated capnweb types); consumers re-interleave by position. */
 export type CollabChanges = {
   baseContent: string;
   baseVersion: number;
-  deleted: { at: number; clientId: string; text: string }[];
+  deleted: { at: number; clientId: string; createdAt?: number; text: string }[];
   headVersion: number;
-  inserted: { clientId: string; from: number; to: number }[];
+  inserted: { clientId: string; createdAt?: number; from: number; to: number }[];
 };
 
 /** One event from the workspace's platform stream (the event-sourced spine). */
