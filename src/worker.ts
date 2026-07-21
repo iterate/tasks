@@ -1,9 +1,11 @@
 import handler, { createServerEntry } from "@tanstack/react-start/server-entry";
 import { env as workerEnv } from "cloudflare:workers";
+import { newWorkersWebSocketRpcResponse } from "capnweb";
 import { getServerByName } from "partyserver";
 import type { TasksBoardDurableObject } from "./board-do.ts";
-import { ProjectDial, type TasksCheckoutDurableObject } from "./checkout-do.ts";
+import type { TasksCheckoutDurableObject } from "./checkout-do.ts";
 import type { AppEnv } from "./board-do.ts";
+import { TasksApiRoot, type VesselEnv } from "./rpc-api.ts";
 import { isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
 export { TasksBoardDurableObject } from "./board-do.ts";
@@ -11,9 +13,8 @@ export { TasksCheckoutDurableObject } from "./checkout-do.ts";
 
 // wrangler.jsonc declares exactly these; the app is small enough that a
 // hand-written env type beats generated worker configuration types.
-const env = workerEnv as unknown as AppEnv & {
+const env = workerEnv as unknown as VesselEnv & {
   BOARD: DurableObjectNamespace<TasksBoardDurableObject>;
-  CHECKOUT: DurableObjectNamespace<TasksCheckoutDurableObject>;
 };
 
 const PROJECT_ID_HEADER = "x-itx-project-id";
@@ -115,54 +116,38 @@ export class TasksApp extends IterateWorkerEntrypoint {
 export default createServerEntry({
   async fetch(request) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/healthz") {
+      return new Response("ok", { headers: { "content-type": "text/plain" } });
+    }
+
+    // The vessel's ONE api root: a Cap'n Web WebSocket session. It sits
+    // before the project-header gate on purpose: agents and services dial
+    // the vessel host directly and authenticate with an explicit credential
+    // (whose own project claim scopes the session), while proxied browser
+    // traffic authenticates via the cookie riding its upgrade.
+    if (url.pathname === "/api") {
+      if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("capnweb WebSocket only — upgrade required", { status: 426 });
+      }
+      return newWorkersWebSocketRpcResponse(request, new TasksApiRoot(env, request));
+    }
+
     const projectId = request.headers.get(PROJECT_ID_HEADER);
 
     // No project header → this is a direct hit on the vessel host, not
     // proxied project traffic. Serve only the static landing page.
     if (!projectId) {
-      if (url.pathname === "/api/health") {
-        return new Response("ok", { headers: { "content-type": "text/plain" } });
-      }
       return landingPage();
     }
 
-    // Proxied traffic: board WebSocket upgrades go to the project's DO;
-    // everything else is the TanStack Start app (board UI at `/` + assets).
-    if (url.pathname === "/api/board") {
-      return env.BOARD.getByName(projectId).fetch(request);
-    }
-
-    // The picker's repo list: dial the platform as the requesting user and
-    // read the project's repo catalog. (Not /api/repos — on project hosts
-    // the platform ingress owns that namespace and answers before the
-    // config worker's proxy runs.)
-    if (url.pathname === "/api/checkout-repos") {
-      const token = readCookie(request, "iterate-project-auth");
-      if (!token) return new Response("missing session token", { status: 403 });
-      const dial = new ProjectDial(env.OS_BASE_URL, projectId, token);
-      try {
-        const repos = (await dial.withProject((project) => project.repos.list())) as Array<{
-          path: string;
-        }>;
-        return Response.json(repos.map((repo) => repo.path).sort());
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return new Response(message, { status: 502 });
-      } finally {
-        dial.close();
-      }
-    }
-
-    // Collaborative checkouts: one y-partyserver DO per (project, repo,
-    // checkout id) — the repo rides as ?repoPath= and is bound into the DO
-    // name. WebSocket upgrades speak stock y-protocols sync/awareness; POSTs
-    // to /commit and /generate-message are the git ops (Server.fetch routes
-    // non-upgrade requests to onRequest).
-    const checkout = /^\/api\/checkout\/([^/]+)(?:\/(?:commit|generate-message))?$/.exec(
-      url.pathname,
-    );
-    if (checkout) {
-      const checkoutId = decodeURIComponent(checkout[1]!);
+    // The Yjs lane: y-protocols sync + awareness for one checkout, kept off
+    // /api because it's binary y-websocket wire, not capnweb. One DO per
+    // (project, repo, checkout id) — the repo rides as ?repoPath= and is
+    // bound into the DO name.
+    const yjs = /^\/yjs\/([^/]+)$/.exec(url.pathname);
+    if (yjs) {
+      const checkoutId = decodeURIComponent(yjs[1]!);
       const repoPath = normalizeRepoPath(url.searchParams.get("repoPath"));
       if (!isCheckoutId(checkoutId) || repoPath === null) {
         return new Response("bad checkout id or repo path", { status: 400 });
@@ -174,19 +159,6 @@ export default createServerEntry({
       return stub.fetch(request);
     }
 
-    if (url.pathname === "/api/health") {
-      return new Response("ok", { headers: { "content-type": "text/plain" } });
-    }
-
     return handler.fetch(request);
   },
 });
-
-function readCookie(request: Request, name: string): string | undefined {
-  const header = request.headers.get("cookie") ?? "";
-  for (const part of header.split(";")) {
-    const [key, ...rest] = part.trim().split("=");
-    if (key === name) return rest.join("=");
-  }
-  return undefined;
-}

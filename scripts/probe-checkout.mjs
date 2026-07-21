@@ -2,12 +2,14 @@
 // join the same checkout with the STOCK y-partyserver provider (the
 // y-websocket wire), the way browsers do behind the project proxy (cookie +
 // trusted project id header), and verify that edits and presence propagate.
-// Optionally commits the diff via the plain HTTP op. Run from a directory
-// whose node_modules has `ws`, `yjs`, `y-partyserver`.
+// Optionally commits the diff over a capnweb WebSocket session on /api,
+// cookie-authenticated — the same session the browser UI holds. Run from a
+// directory whose node_modules has `ws`, `yjs`, `y-partyserver`, `capnweb`.
 //   node probe-checkout.mjs <baseUrl> <projectId> <token> <checkoutId> [--commit]
 import { WebSocket as NodeWebSocket } from "ws";
 import * as Y from "yjs";
 import YProvider from "y-partyserver/provider";
+import { newWebSocketRpcSession } from "capnweb";
 
 const [baseUrl, projectId, token, checkoutId, flag] = process.argv.slice(2);
 if (!baseUrl || !projectId || !token || !checkoutId) {
@@ -29,7 +31,7 @@ class AuthedWebSocket extends NodeWebSocket {
 function connect(name) {
   const doc = new Y.Doc();
   const provider = new YProvider(base.host, checkoutId, doc, {
-    prefix: `/api/checkout/${encodeURIComponent(checkoutId)}`,
+    prefix: `/yjs/${encodeURIComponent(checkoutId)}`,
     protocol: base.protocol === "https:" ? "wss" : "ws",
     WebSocketPolyfill: AuthedWebSocket,
     disableBc: true,
@@ -93,17 +95,18 @@ await until(
 );
 
 if (flag === "--commit") {
-  const response = await fetch(
-    new URL(`/api/checkout/${encodeURIComponent(checkoutId)}/commit`, base),
-    {
-      method: "POST",
-      headers: { ...authHeaders, "content-type": "application/json" },
-      body: JSON.stringify({ message: "Add collab probe task" }),
-    },
-  );
-  if (!response.ok) throw new Error(`commit failed: ${response.status} ${await response.text()}`);
-  const result = await response.json();
+  // The browser lane, byte for byte: a capnweb WebSocket session on /api
+  // with the session cookie riding the upgrade, authenticate() taking no
+  // argument.
+  const wsUrl = new URL("/api", base);
+  wsUrl.protocol = base.protocol === "https:" ? "wss:" : "ws:";
+  const apiSocket = new AuthedWebSocket(wsUrl.toString());
+  const api = newWebSocketRpcSession(apiSocket);
+  const project = api.authenticate();
+  console.log("repos via cookie lane:", JSON.stringify(await project.repos()));
+  const result = await project.checkout(checkoutId).commit("Add collab probe task");
   console.log("committed:", JSON.stringify(result));
+  apiSocket.close();
   await until(
     "both see the new base commit",
     () =>

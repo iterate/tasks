@@ -12,14 +12,17 @@ import {
   taskCommitMessagePrompt,
 } from "./tasks-model.ts";
 import {
+  applyTextEdit,
   checkoutBaseCommit,
   checkoutBaseContents,
   checkoutFileContents,
   checkoutFilesMap,
   checkoutMetaMap,
   checkoutRepoChanges,
+  checkoutTaskChanges,
   normalizeRepoPath,
 } from "./lib/checkout-shared.ts";
+import type { CheckoutSnapshot, ProjectCredential } from "./lib/tasks-api.ts";
 const PROJECT_ID_HEADER = "x-itx-project-id";
 const AUTH_COOKIE = "iterate-project-auth";
 const TASK_COMMIT_MODEL = "openai/gpt-5.5";
@@ -30,7 +33,7 @@ const DOC_STORAGE_KEY = "doc";
  * named `<projectId>:<repoPath>:<checkoutId>` (any of the project's repos —
  * the picker on `/` chooses; /repos/config is the default). The stock mixin
  * does all the Yjs work —
- * y-protocols sync + awareness relay over `/api/checkout/<id>` WebSockets
+ * y-protocols sync + awareness relay over `/yjs/<id>` WebSockets
  * (the standard y-websocket wire, so the stock provider and editor bindings
  * just work) plus a debounced `onSave`. This subclass only adds:
  *
@@ -41,9 +44,10 @@ const DOC_STORAGE_KEY = "doc";
  *    against `${OS_BASE_URL}/api`; the first successful join seeds the doc
  *    from the repo's task files at HEAD ("files": path → Y.Text, "meta":
  *    base commit + base contents).
- *  - `onRequest`: plain HTTP POSTs for git ops — `/commit` flushes the doc's
- *    diff against base as one commit (attributed to the poster's token),
- *    `/generate-message` asks the project's AI for a commit one-liner.
+ *  - plain-data RPC methods (ensureSeeded/filesSnapshot/applyWrite/
+ *    commitDoc/…) — the git and agent ops behind the capnweb API in
+ *    rpc-api.ts. Mutations transact on the live doc, so the mixin's update
+ *    hook broadcasts them to every collaborator and schedules persistence.
  */
 export class TasksCheckoutDurableObject extends YServer {
   #env(): AppEnv {
@@ -89,27 +93,84 @@ export class TasksCheckoutDurableObject extends YServer {
     });
   }
 
-  override async onRequest(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const op = url.pathname.split("/").at(-1);
-    if (request.method !== "POST" || (op !== "commit" && op !== "generate-message")) {
-      return new Response("not found", { status: 404 });
+  /** Non-upgrade HTTP has no business here — the API lives at /api (capnweb). */
+  override async onRequest(): Promise<Response> {
+    return new Response("not found — the tasks API is capnweb at /api", { status: 404 });
+  }
+
+  /**
+   * Seed the doc from the repo's HEAD task files if nobody has yet — the
+   * capnweb lane's counterpart to the onConnect seeding, so an agent can be
+   * the very first thing that ever touches a checkout. Verifies the token by
+   * using it, same as a join.
+   */
+  async ensureSeeded(
+    credential: ProjectCredential,
+    projectId: string,
+    repoPath: string,
+  ): Promise<void> {
+    if (checkoutBaseCommit(this.document) !== undefined) return;
+    await this.#withCredentialDial(projectId, credential, (dial) =>
+      this.#verifyAndSeed(dial, repoPath),
+    );
+  }
+
+  async filesSnapshot(): Promise<CheckoutSnapshot> {
+    return {
+      baseCommit: checkoutBaseCommit(this.document) ?? "",
+      files: checkoutFileContents(this.document),
+    };
+  }
+
+  async readFile(path: string): Promise<string | null> {
+    const text = checkoutFilesMap(this.document).get(path);
+    return text === undefined ? null : text.toString();
+  }
+
+  /**
+   * Set (or with `content === null`, delete) one task file on the live doc.
+   * Existing files get a minimal splice, so a collaborator typing elsewhere
+   * in the same file keeps their characters.
+   */
+  async applyWrite(path: string, content: string | null): Promise<void> {
+    if (!isTaskFilePath(path)) {
+      throw new Error(`${path} is not a task file — checkouts only edit tasks/ markdown`);
     }
-    try {
-      const repoPath = repoPathFromRequest(request);
-      const body = (await request.json()) as {
-        message?: string;
-        changes?: TaskChangeSummary[];
-      };
-      const result = await this.#withDial<CommitResult | string>(request, (dial) =>
-        op === "commit"
-          ? this.#commit(dial, repoPath, body.message ?? "")
-          : this.#generateCommitMessage(dial, body.changes ?? []),
-      );
-      return Response.json(result);
-    } catch (error) {
-      return new Response(errorText(error), { status: 500 });
-    }
+    this.document.transact(() => {
+      const files = checkoutFilesMap(this.document);
+      if (content === null) {
+        files.delete(path);
+        return;
+      }
+      const existing = files.get(path);
+      if (existing) applyTextEdit(existing, content);
+      else files.set(path, new Y.Text(content));
+    });
+  }
+
+  async changesSummary(): Promise<TaskChangeSummary[]> {
+    return checkoutTaskChanges(
+      checkoutFileContents(this.document),
+      checkoutBaseContents(this.document),
+    );
+  }
+
+  async commitDoc(
+    credential: ProjectCredential,
+    projectId: string,
+    repoPath: string,
+    message: string,
+  ): Promise<CommitResult> {
+    return this.#withCredentialDial(projectId, credential, (dial) =>
+      this.#commit(dial, repoPath, message),
+    );
+  }
+
+  async generateMessageDoc(credential: ProjectCredential, projectId: string): Promise<string> {
+    const changes = await this.changesSummary();
+    return this.#withCredentialDial(projectId, credential, (dial) =>
+      this.#generateCommitMessage(dial, changes),
+    );
   }
 
   /**
@@ -169,7 +230,20 @@ export class TasksCheckoutDurableObject extends YServer {
     const projectId = request.headers.get(PROJECT_ID_HEADER);
     const token = readCookie(request, AUTH_COOKIE);
     if (!projectId || !token) throw new Error("missing project id or session token");
-    const dial = new ProjectDial(this.#env().OS_BASE_URL, projectId, token);
+    return this.#withCredentialDial(
+      projectId,
+      { type: "project-app-session", token },
+      operation,
+    );
+  }
+
+  /** Same dial, from an explicit credential — the capnweb RPC lane's entry. */
+  async #withCredentialDial<T>(
+    projectId: string,
+    credential: ProjectCredential,
+    operation: (dial: ProjectDial) => Promise<T>,
+  ): Promise<T> {
+    const dial = new ProjectDial(this.#env().OS_BASE_URL, projectId, credential);
     try {
       return await operation(dial);
     } finally {
@@ -179,9 +253,10 @@ export class TasksCheckoutDurableObject extends YServer {
 }
 
 /**
- * A lazy dial to the platform as one user: opened on first use, redialed
- * once when a cached session goes stale mid-operation. Same
- * `project-app-session` handshake the board sessions use.
+ * A lazy dial to the platform as one principal: opened on first use,
+ * redialed once when a cached session goes stale mid-operation. The
+ * credential decides who — a user (`project-app-session`, the browser lane)
+ * or the project itself (`project-secret`, the machine lane).
  */
 export class ProjectDial {
   #project: RpcStub<Project> | null = null;
@@ -192,7 +267,7 @@ export class ProjectDial {
   constructor(
     private readonly osBaseUrl: string,
     private readonly projectId: string,
-    private readonly token: string,
+    private readonly credential: ProjectCredential,
   ) {}
 
   async #open(): Promise<RpcStub<Project>> {
@@ -206,10 +281,7 @@ export class ProjectDial {
     this.#socket = socket as unknown as WebSocket;
     const os = newWebSocketRpcSession<UnauthenticatedOs>(socket as unknown as WebSocket);
     this.#session = os as { [Symbol.dispose]?: () => void };
-    const session = os.authenticate({
-      type: "project-app-session",
-      token: this.token,
-    } as never);
+    const session = os.authenticate(this.credential as never);
     return session.projects.get(this.projectId) as unknown as RpcStub<Project>;
   }
 

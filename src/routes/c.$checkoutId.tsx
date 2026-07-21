@@ -201,8 +201,9 @@ function ReadyCheckout({
 
   const api = useMemo<CommitMessageApi>(
     () => ({
-      generateCommitMessage: (input) =>
-        generateCheckoutMessageOp(checkoutId, repoPath, input.changes),
+      // The DO derives the change set from its own live doc — authoritative
+      // over any one client's view — so nothing rides along here.
+      generateCommitMessage: () => generateCheckoutMessageOp(checkoutId, repoPath),
     }),
     [checkoutId, repoPath],
   );

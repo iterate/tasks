@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import * as Y from "yjs";
 import YProvider from "y-partyserver/provider";
-import type { CommitResult, TaskChangeSummary } from "../state.ts";
-import { DEFAULT_REPO_PATH } from "./checkout-shared.ts";
+import { newWebSocketRpcSession } from "capnweb";
+import type { CommitResult } from "../state.ts";
+import type { TasksApi } from "./tasks-api.ts";
 
 export type CheckoutStatus = "connecting" | "connected" | "ready" | "disconnected";
 
@@ -21,7 +22,7 @@ export function useCheckout(checkoutId: string, repoPath: string) {
     // miss deletions). Registered before any subscriber so it bumps first.
     doc.on("update", () => docVersions.set(doc, (docVersions.get(doc) ?? 0) + 1));
     const provider = new YProvider(window.location.host, `${repoPath}:${checkoutId}`, doc, {
-      prefix: `/api/checkout/${encodeURIComponent(checkoutId)}`,
+      prefix: `/yjs/${encodeURIComponent(checkoutId)}`,
       params: { repoPath },
     });
     provider.awareness.setLocalStateField("user", localCollabUser());
@@ -100,21 +101,42 @@ export function useCheckout(checkoutId: string, repoPath: string) {
 
 const docVersions = new WeakMap<Y.Doc, number>();
 
-/** POST a git op to the checkout's DO. Cookies (auth) ride along same-origin. */
-async function postCheckoutOp<T>(
-  checkoutId: string,
-  repoPath: string,
-  op: "commit" | "generate-message",
-  body: { message?: string; changes?: TaskChangeSummary[] },
+/**
+ * The browser's live Cap'n Web session on the vessel's `/api` root — the
+ * very same API an agent holds via `itx.worker.tasks`. Dialed lazily,
+ * authenticated by the cookie riding the WebSocket upgrade (no explicit
+ * token in browser land), shared by every op on the page, and redialed once
+ * when a call finds the session broken.
+ */
+function dialTasksApi() {
+  const url = new URL("/api", window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const session = newWebSocketRpcSession<TasksApi>(url.toString());
+  return { session, project: session.authenticate() };
+}
+
+let liveApi: ReturnType<typeof dialTasksApi> | null = null;
+
+async function withProject<T>(
+  operation: (project: ReturnType<typeof dialTasksApi>["project"]) => PromiseLike<T>,
 ): Promise<T> {
-  const query = repoPath === DEFAULT_REPO_PATH ? "" : `?repoPath=${encodeURIComponent(repoPath)}`;
-  const response = await fetch(`/api/checkout/${encodeURIComponent(checkoutId)}/${op}${query}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) throw new Error(await response.text());
-  return (await response.json()) as T;
+  liveApi ??= dialTasksApi();
+  try {
+    return await operation(liveApi.project);
+  } catch (firstError) {
+    try {
+      (liveApi.session as { [Symbol.dispose]?: () => void })[Symbol.dispose]?.();
+    } catch {
+      // a broken session may already be gone
+    }
+    liveApi = dialTasksApi();
+    try {
+      return await operation(liveApi.project);
+    } catch (secondError) {
+      liveApi = null;
+      throw secondError ?? firstError;
+    }
+  }
 }
 
 export function commitCheckoutOp(
@@ -122,22 +144,16 @@ export function commitCheckoutOp(
   repoPath: string,
   message: string,
 ): Promise<CommitResult> {
-  return postCheckoutOp<CommitResult>(checkoutId, repoPath, "commit", { message });
+  return withProject((project) => project.checkout(checkoutId, repoPath).commit(message));
 }
 
-export function generateCheckoutMessageOp(
-  checkoutId: string,
-  repoPath: string,
-  changes: TaskChangeSummary[],
-): Promise<string> {
-  return postCheckoutOp<string>(checkoutId, repoPath, "generate-message", { changes });
+export function generateCheckoutMessageOp(checkoutId: string, repoPath: string): Promise<string> {
+  return withProject((project) => project.checkout(checkoutId, repoPath).generateMessage());
 }
 
 /** The project's repos, for the landing-page picker. */
-export async function listRepos(): Promise<string[]> {
-  const response = await fetch("/api/checkout-repos");
-  if (!response.ok) throw new Error(await response.text());
-  return (await response.json()) as string[];
+export function listRepos(): Promise<string[]> {
+  return withProject((project) => project.repos());
 }
 
 /** The identity this browser collaborates as — persisted locally, renameable. */
