@@ -117,6 +117,11 @@ export interface TasksWorkspace {
   wait(filePath: string, epoch: string, afterVersion: number): Promise<CollabWaitResult>;
   /** Every task file in the merged view (board seed). */
   files(): Promise<Record<string, string>>;
+  /** Filesystem trio with the platform gateway's semantics: live sessions
+   * route reads/writes; delete durably ends a session. */
+  read(path: string): Promise<string | null>;
+  write(path: string, content: string): Promise<void>;
+  delete(path: string): Promise<boolean>;
   // Git passthroughs stay platform-shaped; the pinned client predates them.
   status(): Promise<unknown>;
   commit(message: string): Promise<unknown>;

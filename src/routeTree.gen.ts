@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CCheckoutIdRouteImport } from './routes/c.$checkoutId'
 import { Route as CollabCheckoutIdRouteImport } from './routes/collab.$checkoutId'
+import { Route as WCheckoutIdRouteImport } from './routes/w.$checkoutId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,49 @@ const CollabCheckoutIdRoute = CollabCheckoutIdRouteImport.update({
   path: '/collab/$checkoutId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WCheckoutIdRoute = WCheckoutIdRouteImport.update({
+  id: '/w/$checkoutId',
+  path: '/w/$checkoutId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/c/$checkoutId': typeof CCheckoutIdRoute
   '/collab/$checkoutId': typeof CollabCheckoutIdRoute
+  '/w/$checkoutId': typeof WCheckoutIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/c/$checkoutId': typeof CCheckoutIdRoute
   '/collab/$checkoutId': typeof CollabCheckoutIdRoute
+  '/w/$checkoutId': typeof WCheckoutIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/c/$checkoutId': typeof CCheckoutIdRoute
   '/collab/$checkoutId': typeof CollabCheckoutIdRoute
+  '/w/$checkoutId': typeof WCheckoutIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/c/$checkoutId' | '/collab/$checkoutId'
+  fullPaths: '/' | '/c/$checkoutId' | '/collab/$checkoutId' | '/w/$checkoutId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/c/$checkoutId' | '/collab/$checkoutId'
-  id: '__root__' | '/' | '/c/$checkoutId' | '/collab/$checkoutId'
+  to: '/' | '/c/$checkoutId' | '/collab/$checkoutId' | '/w/$checkoutId'
+  id:
+    | '__root__'
+    | '/'
+    | '/c/$checkoutId'
+    | '/collab/$checkoutId'
+    | '/w/$checkoutId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   CCheckoutIdRoute: typeof CCheckoutIdRoute
   CollabCheckoutIdRoute: typeof CollabCheckoutIdRoute
+  WCheckoutIdRoute: typeof WCheckoutIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +97,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CollabCheckoutIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/w/$checkoutId': {
+      id: '/w/$checkoutId'
+      path: '/w/$checkoutId'
+      fullPath: '/w/$checkoutId'
+      preLoaderRoute: typeof WCheckoutIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +111,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   CCheckoutIdRoute: CCheckoutIdRoute,
   CollabCheckoutIdRoute: CollabCheckoutIdRoute,
+  WCheckoutIdRoute: WCheckoutIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
