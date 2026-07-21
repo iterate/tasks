@@ -155,6 +155,15 @@ export default createServerEntry({
       return stub.fetch(request);
     }
 
-    return handler.fetch(request);
+    // TanStack SSR pages must never be cached: a stale HTML shell references
+    // retired asset hashes and resurrects old UI until a hard refresh. The
+    // hashed /assets/* files keep their long-lived caching.
+    const response = await handler.fetch(request);
+    if ((response.headers.get("content-type") ?? "").includes("text/html")) {
+      const fresh = new Response(response.body, response);
+      fresh.headers.set("cache-control", "no-store");
+      return fresh;
+    }
+    return response;
   },
 });
