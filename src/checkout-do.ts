@@ -67,11 +67,36 @@ export class TasksCheckoutDurableObject extends YServer {
     try {
       const repoPath = repoPathFromRequest(ctx.request);
       await this.#withDial(ctx.request, (dial) => this.#verifyAndSeed(dial, repoPath));
+      const projectId = ctx.request.headers.get(PROJECT_ID_HEADER);
+      if (projectId) this.#reportToIndex(projectId, repoPath);
     } catch (error) {
       connection.close(4403, `session rejected: ${errorText(error)}`.slice(0, 120));
       return;
     }
     super.onConnect(connection, ctx);
+  }
+
+  /**
+   * Tell the project's checkout index this checkout exists / is active.
+   * Fire-and-forget: the index is a convenience catalog for the sidebar,
+   * never worth failing a join or commit over.
+   */
+  #reportToIndex(projectId: string, repoPath: string): void {
+    const checkoutId = this.name.split(":").at(-1);
+    if (!checkoutId) return;
+    const index = (
+      this.env as unknown as {
+        INDEX: DurableObjectNamespace<
+          import("./checkout-index-do.ts").TasksCheckoutIndexDurableObject
+        >;
+      }
+    ).INDEX;
+    this.ctx.waitUntil(
+      index
+        .getByName(projectId)
+        .record({ repoPath, checkoutId, baseCommit: checkoutBaseCommit(this.document) })
+        .catch(() => {}),
+    );
   }
 
   /** listTaskFiles both proves the token works and provides the seed. */
@@ -109,10 +134,12 @@ export class TasksCheckoutDurableObject extends YServer {
     projectId: string,
     repoPath: string,
   ): Promise<void> {
-    if (checkoutBaseCommit(this.document) !== undefined) return;
-    await this.#withCredentialDial(projectId, credential, (dial) =>
-      this.#verifyAndSeed(dial, repoPath),
-    );
+    if (checkoutBaseCommit(this.document) === undefined) {
+      await this.#withCredentialDial(projectId, credential, (dial) =>
+        this.#verifyAndSeed(dial, repoPath),
+      );
+    }
+    this.#reportToIndex(projectId, repoPath);
   }
 
   async filesSnapshot(): Promise<CheckoutSnapshot> {
@@ -161,9 +188,11 @@ export class TasksCheckoutDurableObject extends YServer {
     repoPath: string,
     message: string,
   ): Promise<CommitResult> {
-    return this.#withCredentialDial(projectId, credential, (dial) =>
+    const result = await this.#withCredentialDial(projectId, credential, (dial) =>
       this.#commit(dial, repoPath, message),
     );
+    this.#reportToIndex(projectId, repoPath);
+    return result;
   }
 
   async generateMessageDoc(credential: ProjectCredential, projectId: string): Promise<string> {

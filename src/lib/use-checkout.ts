@@ -3,7 +3,7 @@ import * as Y from "yjs";
 import YProvider from "y-partyserver/provider";
 import { newWebSocketRpcSession } from "capnweb";
 import type { CommitResult } from "../state.ts";
-import type { TasksApi } from "./tasks-api.ts";
+import type { CheckoutIndexEntry, TasksApi } from "./tasks-api.ts";
 
 export type CheckoutStatus = "connecting" | "connected" | "ready" | "disconnected";
 
@@ -151,9 +151,14 @@ export function generateCheckoutMessageOp(checkoutId: string, repoPath: string):
   return withProject((project) => project.checkout(checkoutId, repoPath).generateMessage());
 }
 
-/** The project's repos, for the landing-page picker. */
+/** The project's repos, for the sidebar's top-level hierarchy. */
 export function listRepos(): Promise<string[]> {
   return withProject((project) => project.repos());
+}
+
+/** Every known checkout (from the project's index DO), newest activity first. */
+export function listCheckouts(): Promise<CheckoutIndexEntry[]> {
+  return withProject((project) => project.checkouts());
 }
 
 /** The identity this browser collaborates as — persisted locally, renameable. */

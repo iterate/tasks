@@ -9,18 +9,16 @@ import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
 const editorTheme = EditorView.theme(
   {
     "&": {
-      backgroundColor: "#0b0d10",
-      color: "#e6e8eb",
-      fontSize: "0.8rem",
-      border: "1px solid #2a2f36",
-      borderRadius: "8px",
+      backgroundColor: "transparent",
+      color: "var(--foreground)",
+      fontSize: "0.85rem",
       height: "100%",
     },
-    "&.cm-focused": { outline: "1px solid #4a5460" },
+    "&.cm-focused": { outline: "none" },
     ".cm-content": {
       fontFamily: "ui-monospace, monospace",
-      caretColor: "#e6e8eb",
-      padding: "0.6rem",
+      caretColor: "var(--foreground)",
+      padding: "0.6rem 0.25rem",
     },
     ".cm-scroller": { fontFamily: "ui-monospace, monospace" },
     ".cm-ySelectionInfo": {

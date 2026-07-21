@@ -13,6 +13,10 @@
       "type": "durable-object",
       "storage": "sqlite",
     },
+    "TasksCheckoutIndexDurableObject": {
+      "type": "durable-object",
+      "storage": "sqlite",
+    },
   },
   "durable_objects": {
     "bindings": [
@@ -23,6 +27,10 @@
       {
         "name": "CHECKOUT",
         "class_name": "TasksCheckoutDurableObject",
+      },
+      {
+        "name": "INDEX",
+        "class_name": "TasksCheckoutIndexDurableObject",
       },
     ],
   },

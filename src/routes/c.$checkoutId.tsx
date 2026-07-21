@@ -1,8 +1,8 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
+import { CheckIcon, LinkIcon, SearchIcon, Settings2Icon } from "lucide-react";
 import {
   DEFAULT_REPO_PATH,
   applyTextEdit,
@@ -21,19 +21,36 @@ import {
   useCheckout,
 } from "../lib/use-checkout.ts";
 import { useTaskCommit, type CommitMessageApi } from "../lib/use-task-commit.ts";
-import type { TaskCard, TaskChangeSummary } from "../state.ts";
+import type { TaskChangeSummary } from "../state.ts";
 import {
+  columnsForTasks,
   fallbackCommitMessage,
   isTaskFilePath,
   newTaskFile,
-  parseTaskCard,
   setTaskCardState,
   taskColumnState,
   taskPathForTitle,
 } from "../tasks-model.ts";
+import {
+  taskPathInFolder,
+  toBoardTask,
+  type BoardTask,
+  type PresenceUser,
+} from "../lib/board-model.ts";
+import { Board } from "../components/board.tsx";
+import { TaskSheet } from "../components/task-sheet.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
-import { Kanban, type PresenceUser } from "../components/kanban.tsx";
-import { TaskEditor } from "../components/task-editor.tsx";
+import { Button } from "../ui/button.tsx";
+import { Input } from "../ui/input.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select.tsx";
+import { SidebarTrigger } from "../ui/sidebar.tsx";
+import { Skeleton } from "../ui/skeleton.tsx";
 
 export const Route = createFileRoute("/c/$checkoutId")({
   validateSearch: (search: Record<string, unknown>): { repoPath?: string } => {
@@ -45,22 +62,13 @@ export const Route = createFileRoute("/c/$checkoutId")({
   component: CheckoutPage,
 });
 
-/** Everything the board derives from the shared doc, recomputed per doc change. */
-type CheckoutSnapshot = {
-  files: Record<string, string>;
-  base: Record<string, string>;
-  baseCommit: string | undefined;
-  tasks: TaskCard[];
-  taskChanges: TaskChangeSummary[];
-};
+type Peer = { id: number; user: PresenceUser; openPath: string | null };
 
 /**
- * The collaborative board. Every mutation — drags, adds, deletes, and each
- * keystroke in the detail editor — edits the checkout's shared Y.Doc, so
- * all collaborators repaint together and see each other's cursors. The
- * commit surface POSTs to the checkout DO, which flushes the doc's diff
- * against its base commit as ONE git commit, attributed to whoever pressed
- * the button (or whose autosave fired).
+ * The collaborative board page. Everything above the board lives in ONE
+ * filter strip (no page header): sidebar trigger, task filter, grouping
+ * control, presence, and the commit surface. Every mutation edits the
+ * checkout's shared Y.Doc, so all collaborators repaint together.
  */
 function CheckoutPage() {
   const { checkoutId } = Route.useParams();
@@ -70,14 +78,14 @@ function CheckoutPage() {
     repoPath,
   );
 
-  const snapshot = useMemo<CheckoutSnapshot | null>(() => {
+  const snapshot = useMemo(() => {
     if (doc === null) return null;
     void docVersion; // dependency: recompute when the doc changes
     const files = checkoutFileContents(doc);
     const base = checkoutBaseContents(doc);
     const tasks = Object.entries(files)
       .filter(([path]) => isTaskFilePath(path))
-      .map(([path, source]) => parseTaskCard(path, source))
+      .map(([path, source]) => toBoardTask(path, source))
       .sort((a, b) => a.path.localeCompare(b.path));
     return {
       files,
@@ -88,10 +96,10 @@ function CheckoutPage() {
     };
   }, [doc, docVersion]);
 
-  const peers = useMemo<Array<{ id: number; user: PresenceUser; openPath: string | null }>>(() => {
+  const peers = useMemo<Peer[]>(() => {
     if (provider === null || doc === null) return [];
     void awarenessVersion;
-    const listed: Array<{ id: number; user: PresenceUser; openPath: string | null }> = [];
+    const listed: Peer[] = [];
     for (const [id, state] of provider.awareness.getStates()) {
       if (id === doc.clientID) continue;
       const user = (state as { user?: PresenceUser }).user;
@@ -102,49 +110,36 @@ function CheckoutPage() {
     return listed;
   }, [provider, doc, awarenessVersion]);
 
-  const seeded = snapshot?.baseCommit !== undefined;
+  const ready = provider !== null && doc !== null && snapshot?.baseCommit !== undefined;
 
   return (
-    <div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.75rem",
-          margin: "0 0 1rem",
-          flexWrap: "wrap",
-        }}
-      >
-        <h1 style={{ fontSize: "1.2rem", margin: 0 }}>
-          <span style={{ color: "#6b7280", fontWeight: 400 }}>checkout / </span>
-          {checkoutId}
-          {repoPath === DEFAULT_REPO_PATH ? null : (
-            <code style={{ color: "#9aa3ad", fontSize: "0.8rem", marginLeft: "0.5rem" }}>
-              {repoPath}
-            </code>
-          )}
-        </h1>
-        <PresenceStrip provider={provider} peers={peers} />
-        <span style={{ flex: 1 }} />
-        <ShareLink />
-        <Link to="/" style={{ color: "#6b7280", fontSize: "0.85rem" }}>
-          new checkout
-        </Link>
-      </div>
-      {status === "disconnected" ? (
-        <ErrorCard message="disconnected — reconnecting… (edits keep working and sync when back)" />
-      ) : null}
-      {provider === null || doc === null || snapshot === null || !seeded ? (
-        <p style={{ color: "#9aa3ad" }}>opening the checkout…</p>
-      ) : (
+    <div className="flex h-full min-h-0 flex-col">
+      {ready ? (
         <ReadyCheckout
           checkoutId={checkoutId}
           repoPath={repoPath}
           provider={provider}
           doc={doc}
-          snapshot={snapshot}
+          snapshot={snapshot!}
           peers={peers}
+          disconnected={status === "disconnected"}
         />
+      ) : (
+        <div className="flex flex-col gap-3 p-4">
+          <div className="flex items-center gap-2">
+            <SidebarTrigger />
+            <span className="font-mono text-xs text-muted-foreground">{checkoutId}</span>
+          </div>
+          <Skeleton className="h-8 w-64" />
+          <div className="flex gap-2">
+            <Skeleton className="h-40 w-72" />
+            <Skeleton className="h-40 w-72" />
+            <Skeleton className="h-40 w-72" />
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {status === "disconnected" ? "disconnected — retrying…" : "opening the checkout…"}
+          </p>
+        </div>
       )}
     </div>
   );
@@ -157,15 +152,36 @@ function ReadyCheckout({
   doc,
   snapshot,
   peers,
+  disconnected,
 }: {
   checkoutId: string;
   repoPath: string;
   provider: YProvider;
   doc: Y.Doc;
-  snapshot: CheckoutSnapshot;
-  peers: Array<{ id: number; user: PresenceUser; openPath: string | null }>;
+  snapshot: {
+    files: Record<string, string>;
+    base: Record<string, string>;
+    baseCommit: string | undefined;
+    tasks: BoardTask[];
+    taskChanges: TaskChangeSummary[];
+  };
+  peers: Peer[];
+  disconnected: boolean;
 }) {
   const { files, base, baseCommit, tasks, taskChanges } = snapshot;
+  const [filter, setFilter] = useState("");
+  const [rowField, setRowField] = useState<"folder" | null>("folder");
+  const [openPath, setOpenPath] = useState<string | null>(null);
+
+  const filteredTasks = useMemo(() => {
+    const query = filter.trim().toLocaleLowerCase();
+    if (query === "") return tasks;
+    return tasks.filter((task) =>
+      [task.title, task.summary, task.state, task.folder, task.path, ...task.labels].some(
+        (value) => value.toLocaleLowerCase().includes(query),
+      ),
+    );
+  }, [tasks, filter]);
 
   const taskChangeByPath = useMemo(
     () => new Map(taskChanges.map((change) => [change.path, change.status] as const)),
@@ -201,8 +217,6 @@ function ReadyCheckout({
 
   const api = useMemo<CommitMessageApi>(
     () => ({
-      // The DO derives the change set from its own live doc — authoritative
-      // over any one client's view — so nothing rides along here.
       generateCommitMessage: () => generateCheckoutMessageOp(checkoutId, repoPath),
     }),
     [checkoutId, repoPath],
@@ -210,8 +224,6 @@ function ReadyCheckout({
 
   const commitCheckout = useCallback(
     async (message: string | undefined) => {
-      // The DO computes the authoritative diff at commit time; the fallback
-      // message summarizes this client's view of the same change set.
       setCommitPending(true);
       setCommitError(null);
       try {
@@ -223,7 +235,6 @@ function ReadyCheckout({
               checkoutTaskChanges(checkoutFileContents(doc), checkoutBaseContents(doc)),
             ),
         );
-        // The new base + baseCommit arrive back through the doc sync.
       } catch (error) {
         setCommitError(error instanceof Error ? error.message : String(error));
         throw error;
@@ -247,20 +258,35 @@ function ReadyCheckout({
     if (text) applyTextEdit(text, content);
     else filesMap.set(path, new Y.Text(content));
   };
-  const moveTask = (task: TaskCard, state: string) => {
-    if (taskColumnState(task.state) === state) return;
-    writeTask(task.path, setTaskCardState(task.source, state));
-  };
-  const addTask = (title: string, state: string) => {
-    const reserved = new Set([...Object.keys(files), ...Object.keys(base)]);
-    let file = newTaskFile({ title, state });
-    for (let suffix = 2; reserved.has(file.path); suffix++) {
-      file = { ...file, path: taskPathForTitle(title, `${suffix}`) };
+  const moveTask = (task: BoardTask, state: string, folder: string) => {
+    const content =
+      taskColumnState(task.state) === state ? task.source : setTaskCardState(task.source, state);
+    if (folder === task.folder) {
+      if (content !== task.source) writeTask(task.path, content);
+      return;
     }
-    filesMap.set(file.path, new Y.Text(file.content));
+    // Cross-folder drop = rename: same file content lands on the new path.
+    const nextPath = taskPathInFolder(task.path, folder);
+    if (nextPath === task.path || filesMap.has(nextPath)) return;
+    doc.transact(() => {
+      filesMap.delete(task.path);
+      filesMap.set(nextPath, new Y.Text(content));
+    });
+    if (openPath === task.path) setOpenPath(nextPath);
   };
-  const deleteTask = (task: TaskCard) => {
-    filesMap.delete(task.path);
+  const addTask = (state: string, folder: string | null) => {
+    const reserved = new Set([...Object.keys(files), ...Object.keys(base)]);
+    let file = newTaskFile({ title: "New task", state });
+    for (let suffix = 2; reserved.has(inFolder(file.path, folder)); suffix++) {
+      file = { ...file, path: taskPathForTitle("New task", `${suffix}`) };
+    }
+    const path = inFolder(file.path, folder);
+    filesMap.set(path, new Y.Text(file.content));
+    setOpenPath(path);
+  };
+  const deleteTask = (path: string) => {
+    filesMap.delete(path);
+    if (openPath === path) setOpenPath(null);
   };
   /** Back to the base commit's version: restore a delete, drop an add, undo edits. */
   const revertTask = (path: string) => {
@@ -279,89 +305,122 @@ function ReadyCheckout({
     });
   };
 
+  const columns = useMemo(() => columnsForTasks(tasks).map((column) => column.state), [tasks]);
+  const openTask = openPath === null ? null : (tasks.find((task) => task.path === openPath) ?? null);
+
   return (
     <>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: "0.75rem",
-          margin: "0 0 0.75rem",
-        }}
-      >
-        <CommitControls
-          taskChanges={taskChanges}
-          commitMessage={commit.commitMessage}
-          onCommitMessageChange={commit.setCommitMessage}
-          commitPending={commitPending}
-          generatingMessage={commit.generatingMessage}
-          autoSaveDueAt={commit.autoSaveDueAt}
-          canCommit={true}
-          onMakeCommit={commit.makeCommit}
-          onWriteCommitMessage={commit.writeCommitMessage}
-          onDiscardAll={discardAll}
-        />
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b bg-background px-2 py-1.5">
+        <SidebarTrigger className="-ml-0.5" />
+        <div className="relative min-w-0 flex-1 sm:max-w-64">
+          <SearchIcon
+            aria-hidden
+            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={filter}
+            onChange={(event) => setFilter(event.currentTarget.value)}
+            placeholder="Filter tasks"
+            aria-label="Filter tasks"
+            className="h-8 pl-8 text-sm"
+          />
+        </div>
+        <span className="hidden text-xs tabular-nums whitespace-nowrap text-muted-foreground md:inline">
+          {filteredTasks.length}/{tasks.length} tasks
+          {baseCommit ? <> · {baseCommit.slice(0, 7)}</> : null}
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <PresenceStrip provider={provider} peers={peers} />
+          <ShareLink />
+          <Select
+            items={[
+              { label: "Group: folder", value: "folder" },
+              { label: "No grouping", value: "none" },
+            ]}
+            value={rowField ?? "none"}
+            onValueChange={(value) => setRowField(value === "folder" ? "folder" : null)}
+          >
+            <SelectTrigger
+              aria-label="Board grouping"
+              size="sm"
+              className="h-8 w-fit gap-1.5 text-xs"
+            >
+              <Settings2Icon aria-hidden className="size-3.5 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="folder">Group: folder</SelectItem>
+              <SelectItem value="none">No grouping</SelectItem>
+            </SelectContent>
+          </Select>
+          <CommitControls
+            taskChanges={taskChanges}
+            commitMessage={commit.commitMessage}
+            onCommitMessageChange={commit.setCommitMessage}
+            commitPending={commitPending}
+            generatingMessage={commit.generatingMessage}
+            autoSaveDueAt={commit.autoSaveDueAt}
+            canCommit={true}
+            onMakeCommit={commit.makeCommit}
+            onWriteCommitMessage={commit.writeCommitMessage}
+            onDiscardAll={discardAll}
+          />
+        </div>
       </div>
-      {commitError ? <ErrorCard message={`commit failed: ${commitError}`} /> : null}
+      {disconnected ? (
+        <p className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-300">
+          disconnected — reconnecting… (edits keep working and sync when back)
+        </p>
+      ) : null}
+      {commitError ? (
+        <p className="border-b bg-destructive/10 px-3 py-1 text-xs text-red-300">
+          commit failed: {commitError}
+        </p>
+      ) : null}
       <DeletedTasksStrip deletedChanges={deletedChanges} onRestore={revertTask} />
-      <Kanban
-        tasks={tasks}
+      <Board
+        tasks={filteredTasks}
+        rowField={rowField}
         taskChangeByPath={taskChangeByPath}
         presenceByPath={presenceByPath}
         onMove={moveTask}
         onAdd={addTask}
-        onDiscard={revertTask}
-        onDelete={deleteTask}
-        renderEditor={(task) => {
-          const text = filesMap.get(task.path);
-          return text ? (
-            <TaskEditor
-              key={task.path}
-              path={task.path}
-              text={text}
-              awareness={provider.awareness}
-            />
-          ) : null;
-        }}
+        onOpen={setOpenPath}
       />
-      <p style={{ color: "#6b7280", fontSize: "0.8rem", marginTop: "1rem" }}>
-        {baseCommit ? <code>{baseCommit.slice(0, 7)}</code> : null}
-        {" · "}
-        {tasks.length} task{tasks.length === 1 ? "" : "s"}
-        {taskChanges.length > 0 ? (
-          <>
-            {" · "}
-            <span style={{ color: "#d9a05b" }}>
-              {taskChanges.length} uncommitted change{taskChanges.length === 1 ? "" : "s"}
-            </span>
-          </>
-        ) : null}
-        {peers.length > 0 ? (
-          <>
-            {" · "}
-            {peers.length + 1} collaborators
-          </>
-        ) : null}
-      </p>
+      <TaskSheet
+        task={openTask}
+        text={openTask === null ? undefined : filesMap.get(openTask.path)}
+        awareness={provider.awareness}
+        columns={columns}
+        presence={openTask === null ? [] : (presenceByPath.get(openTask.path) ?? [])}
+        changeStatus={openTask === null ? undefined : taskChangeByPath.get(openTask.path)}
+        onChangeState={(state) => {
+          if (openTask !== null) writeTask(openTask.path, setTaskCardState(openTask.source, state));
+        }}
+        onRevert={() => {
+          if (openTask !== null) revertTask(openTask.path);
+        }}
+        onDelete={() => {
+          if (openTask !== null) deleteTask(openTask.path);
+        }}
+        onClose={() => setOpenPath(null)}
+      />
     </>
   );
 }
 
+function inFolder(path: string, folder: string | null): string {
+  return folder === null || folder === "/" ? path : taskPathInFolder(path, folder);
+}
+
 /** You + everyone else in the checkout. Click your own chip to rename. */
-function PresenceStrip({
-  provider,
-  peers,
-}: {
-  provider: YProvider | null;
-  peers: Array<{ id: number; user: PresenceUser; openPath: string | null }>;
-}) {
+function PresenceStrip({ provider, peers }: { provider: YProvider; peers: Peer[] }) {
   const [self, setSelf] = useState(() =>
     typeof window === "undefined" ? null : localCollabUser(),
   );
-  if (provider === null || self === null) return null;
+  if (self === null) return null;
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+    <span className="flex items-center gap-1">
       <button
         type="button"
         title="You — click to rename"
@@ -369,14 +428,8 @@ function PresenceStrip({
           const name = window.prompt("Your collaborator name", self.name);
           if (name?.trim()) setSelf(renameCollabUser(provider, name));
         }}
-        style={{
-          color: self.color,
-          border: `1px solid ${self.color}66`,
-          background: "transparent",
-          borderRadius: "999px",
-          padding: "0.05rem 0.5rem",
-          fontSize: "0.75rem",
-        }}
+        className="rounded-full border bg-transparent px-2 py-0.5 text-[11px]"
+        style={{ color: self.color, borderColor: `${self.color}66` }}
       >
         {self.name}
       </button>
@@ -384,13 +437,8 @@ function PresenceStrip({
         <span
           key={peer.id}
           title={peer.openPath ? `${peer.user.name} — editing ${peer.openPath}` : peer.user.name}
-          style={{
-            color: peer.user.color,
-            border: `1px solid ${peer.user.color}66`,
-            borderRadius: "999px",
-            padding: "0.05rem 0.5rem",
-            fontSize: "0.75rem",
-          }}
+          className="rounded-full border px-2 py-0.5 text-[11px]"
+          style={{ color: peer.user.color, borderColor: `${peer.user.color}66` }}
         >
           {peer.user.name}
         </span>
@@ -402,9 +450,11 @@ function PresenceStrip({
 function ShareLink() {
   const [copied, setCopied] = useState(false);
   return (
-    <button
-      type="button"
-      style={{ fontSize: "0.8rem" }}
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-8 text-xs text-muted-foreground"
+      title="Copy share link"
       onClick={() => {
         void navigator.clipboard.writeText(window.location.href).then(() => {
           setCopied(true);
@@ -412,28 +462,12 @@ function ShareLink() {
         });
       }}
     >
-      {copied ? "copied!" : "copy share link"}
-    </button>
-  );
-}
-
-function ErrorCard({ message, children }: { message: string; children?: ReactNode }) {
-  return (
-    <div
-      style={{
-        maxWidth: "34rem",
-        background: "#2a1b1d",
-        border: "1px solid #4a2a2e",
-        borderRadius: "8px",
-        padding: "0.9rem 1.1rem",
-        margin: "0 0 1rem",
-        display: "flex",
-        alignItems: "center",
-        gap: "0.75rem",
-      }}
-    >
-      <span style={{ color: "#e6b3b8", flex: 1 }}>{message}</span>
-      {children}
-    </div>
+      {copied ? (
+        <CheckIcon aria-hidden className="size-3.5" />
+      ) : (
+        <LinkIcon aria-hidden className="size-3.5" />
+      )}
+      {copied ? "Copied" : "Share"}
+    </Button>
   );
 }

@@ -10,6 +10,7 @@ import { isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
 export { TasksBoardDurableObject } from "./board-do.ts";
 export { TasksCheckoutDurableObject } from "./checkout-do.ts";
+export { TasksCheckoutIndexDurableObject } from "./checkout-index-do.ts";
 
 // wrangler.jsonc declares exactly these; the app is small enough that a
 // hand-written env type beats generated worker configuration types.

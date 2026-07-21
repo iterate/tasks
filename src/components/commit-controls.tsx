@@ -1,15 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { ChevronDownIcon, GitCommitVerticalIcon, SparklesIcon, Undo2Icon } from "lucide-react";
 import type { TaskChangeStatus, TaskChangeSummary } from "../state.ts";
+import { Button } from "../ui/button.tsx";
+import { Input } from "../ui/input.tsx";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover.tsx";
+import { cn } from "../ui/utils.ts";
 
 const STATUS_LETTER: Record<TaskChangeStatus, string> = {
   added: "A",
   modified: "M",
   deleted: "D",
 };
-const STATUS_COLOR: Record<TaskChangeStatus, string> = {
-  added: "#6fbf8f",
-  modified: "#d9a05b",
-  deleted: "#e08a92",
+const STATUS_CLASS: Record<TaskChangeStatus, string> = {
+  added: "text-emerald-400",
+  modified: "text-amber-400",
+  deleted: "text-red-400",
 };
 const STATUS_WORD: Record<TaskChangeStatus, string> = {
   added: "New",
@@ -17,18 +22,12 @@ const STATUS_WORD: Record<TaskChangeStatus, string> = {
   deleted: "Deleted",
 };
 
-/** The A/M/D letter a changed card (or panel row) wears. */
+/** The A/M/D letter a changed row wears. */
 export function ChangeStatusMark({ status }: { status: TaskChangeStatus }) {
   return (
     <span
       title={STATUS_WORD[status]}
-      style={{
-        color: STATUS_COLOR[status],
-        fontFamily: "ui-monospace, monospace",
-        fontWeight: 600,
-        fontSize: "0.75rem",
-        flex: "none",
-      }}
+      className={cn("flex-none font-mono text-xs font-semibold", STATUS_CLASS[status])}
     >
       {STATUS_LETTER[status]}
     </span>
@@ -36,11 +35,10 @@ export function ChangeStatusMark({ status }: { status: TaskChangeStatus }) {
 }
 
 /**
- * The board's git surface: a Commit button with the autosave countdown beside
- * it, and a dropdown panel reviewing the pending change set — one row per
- * changed task file, a commit-message input (empty auto-generates), an AI
- * "write commit message" helper, and Discard all. Ported from the apps/os
- * tasks view's TaskCommitControls.
+ * The board's git surface, restyled to the apps/os dialect: a Commit button
+ * with the autosave countdown beside it and a popover reviewing the pending
+ * change set — one row per changed file, a message input (empty
+ * auto-generates), the AI message helper, and Discard all.
  */
 export function CommitControls({
   taskChanges,
@@ -65,154 +63,86 @@ export function CommitControls({
   onWriteCommitMessage: () => void;
   onDiscardAll: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
   const dirty = taskChanges.length > 0;
   const busy = commitPending || generatingMessage;
 
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (!containerRef.current?.contains(event.target as Node | null)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [open]);
-
   return (
-    <div
-      ref={containerRef}
-      style={{ position: "relative", display: "flex", alignItems: "center", gap: "0.6rem" }}
-    >
+    <div className="flex items-center gap-2">
       {dirty && !commitPending && autoSaveDueAt !== undefined ? (
         <AutoSaveCountdown dueAt={autoSaveDueAt} />
       ) : null}
-      <span style={{ display: "flex" }}>
-        <button
-          type="button"
-          disabled={!dirty || busy || !canCommit}
-          onClick={onMakeCommit}
-          title={
-            dirty
-              ? "Commit task changes (empty message uses a generated summary)"
-              : "No task changes to commit"
-          }
-          style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+      <Popover>
+        <PopoverTrigger
+          render={<Button variant={dirty ? "default" : "outline"} size="sm" disabled={!dirty} />}
         >
-          {commitPending ? "Committing…" : `Commit${dirty ? ` (${taskChanges.length})` : ""}`}
-        </button>
-        <button
-          type="button"
-          disabled={!dirty}
-          onClick={() => setOpen((current) => !current)}
-          aria-label="Review task changes"
-          aria-expanded={open}
-          style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: "none" }}
-        >
-          ▾
-        </button>
-      </span>
-      {open && dirty ? (
-        <div
-          style={{
-            position: "absolute",
-            top: "calc(100% + 0.4rem)",
-            right: 0,
-            width: "24rem",
-            maxWidth: "calc(100vw - 2rem)",
-            background: "#14171b",
-            border: "1px solid #2a2f36",
-            borderRadius: "8px",
-            padding: "0.75rem",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.6rem",
-            zIndex: 20,
-            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)",
-          }}
-        >
-          <span style={{ color: "#9aa3ad", fontSize: "0.8rem" }}>
-            {taskChanges.length} uncommitted task {taskChanges.length === 1 ? "file" : "files"}.
-            Leave the message empty to auto-generate.
-          </span>
-          <ul
-            style={{
-              listStyle: "none",
-              margin: 0,
-              padding: "0.5rem",
-              maxHeight: "10rem",
-              overflowY: "auto",
-              background: "#0e1114",
-              border: "1px solid #2a2f36",
-              borderRadius: "8px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.3rem",
-            }}
-          >
-            {taskChanges.map((change) => (
-              <li
-                key={change.path}
-                title={change.path}
-                style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem" }}
-              >
-                <ChangeStatusMark status={change.status} />
-                <span
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
+          <GitCommitVerticalIcon aria-hidden className="size-3.5" />
+          Commit{dirty ? ` (${taskChanges.length})` : ""}
+          <ChevronDownIcon aria-hidden className="size-3" />
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-96 p-3">
+          <div className="flex flex-col gap-2.5">
+            <p className="text-xs text-muted-foreground">
+              {taskChanges.length} uncommitted task {taskChanges.length === 1 ? "file" : "files"}.
+              An empty message auto-generates one.
+            </p>
+            <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto rounded-md border bg-muted/30 p-2">
+              {taskChanges.map((change) => (
+                <li
+                  key={change.path}
+                  title={change.path}
+                  className="flex items-center gap-2 text-xs"
                 >
-                  {change.title}
-                </span>
-                <span style={{ color: "#6b7280", flex: "none" }}>{STATUS_WORD[change.status]}</span>
-              </li>
-            ))}
-          </ul>
-          <input
-            value={commitMessage}
-            onChange={(event) => onCommitMessageChange(event.target.value)}
-            placeholder="Commit message (leave empty to auto-generate)"
-            aria-label="Commit message"
-            disabled={busy}
-            style={{ fontSize: "0.85rem" }}
-          />
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-            <button
-              type="button"
-              disabled={busy || !canCommit}
-              onClick={onWriteCommitMessage}
-              style={{ fontSize: "0.85rem" }}
-            >
-              {generatingMessage ? "Writing…" : "Write commit message"}
-            </button>
-            <button
-              type="button"
+                  <ChangeStatusMark status={change.status} />
+                  <span className="min-w-0 flex-1 truncate">{change.title}</span>
+                  <span className="flex-none text-muted-foreground">
+                    {STATUS_WORD[change.status]}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <Input
+              value={commitMessage}
+              onChange={(event) => onCommitMessageChange(event.target.value)}
+              placeholder="Commit message (empty auto-generates)"
+              aria-label="Commit message"
               disabled={busy}
-              onClick={() => {
-                if (window.confirm("Discard all uncommitted task changes?")) {
-                  onDiscardAll();
-                  setOpen(false);
-                }
-              }}
-              style={{ fontSize: "0.85rem", color: "#e6b3b8" }}
-            >
-              Discard all
-            </button>
-            <button
-              type="button"
-              disabled={busy || !canCommit}
-              onClick={onMakeCommit}
-              style={{ marginLeft: "auto", fontSize: "0.85rem" }}
-            >
-              {commitPending ? "Committing…" : "Commit"}
-            </button>
+              className="h-8 text-xs"
+            />
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy || !canCommit}
+                onClick={onWriteCommitMessage}
+                className="text-muted-foreground"
+              >
+                <SparklesIcon aria-hidden className="size-3.5" />
+                {generatingMessage ? "Writing…" : "Write message"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy}
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => {
+                  if (window.confirm("Discard all uncommitted task changes?")) onDiscardAll();
+                }}
+              >
+                <Undo2Icon aria-hidden className="size-3.5" />
+                Discard all
+              </Button>
+              <Button
+                size="sm"
+                className="ml-auto"
+                disabled={busy || !canCommit || !dirty}
+                onClick={onMakeCommit}
+              >
+                {commitPending ? "Committing…" : "Commit"}
+              </Button>
+            </div>
           </div>
-        </div>
-      ) : null}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }
@@ -226,8 +156,8 @@ function AutoSaveCountdown({ dueAt }: { dueAt: number }) {
   }, []);
   const secondsLeft = Math.max(0, Math.ceil((dueAt - nowMs) / 1000));
   return (
-    <span style={{ color: "#6b7280", fontSize: "0.8rem", fontVariantNumeric: "tabular-nums" }}>
-      {secondsLeft <= 0 ? "Auto saving…" : `Auto saving in ${secondsLeft}s`}
+    <span className="text-xs tabular-nums whitespace-nowrap text-muted-foreground">
+      {secondsLeft <= 0 ? "Auto committing…" : `Auto commit in ${secondsLeft}s`}
     </span>
   );
 }
@@ -245,47 +175,24 @@ export function DeletedTasksStrip({
 }) {
   if (deletedChanges.length === 0) return null;
   return (
-    <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: "0.5rem",
-        margin: "0 0 0.75rem",
-      }}
-    >
-      <span style={{ color: "#6b7280", fontSize: "0.8rem" }}>Deleted</span>
+    <div className="flex flex-wrap items-center gap-2 border-b bg-background px-3 py-1.5">
+      <span className="text-xs text-muted-foreground">Deleted</span>
       {deletedChanges.map((change) => (
         <span
           key={change.path}
           title={change.path}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.4rem",
-            background: "rgba(224, 138, 146, 0.08)",
-            border: "1px solid rgba(224, 138, 146, 0.35)",
-            borderRadius: "999px",
-            padding: "0.15rem 0.35rem 0.15rem 0.6rem",
-            fontSize: "0.8rem",
-            color: "#e08a92",
-          }}
+          className="inline-flex items-center gap-1.5 rounded-full border border-red-400/40 bg-red-400/10 py-0.5 pr-1 pl-2.5 text-xs text-red-300"
         >
           {change.title}
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 px-1.5 text-[11px] text-foreground"
             onClick={() => onRestore(change.path)}
             title={`Restore ${change.title}`}
-            style={{
-              background: "transparent",
-              border: "none",
-              padding: "0 0.25rem",
-              color: "#e6e8eb",
-              fontSize: "0.8rem",
-            }}
           >
             restore
-          </button>
+          </Button>
         </span>
       ))}
     </div>

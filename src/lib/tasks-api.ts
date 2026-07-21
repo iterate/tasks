@@ -33,10 +33,21 @@ export interface TasksApi {
   authenticate(credential?: string | ProjectCredential): Promise<TasksProject>;
 }
 
+/** One known checkout, as remembered by the project's index DO. */
+export type CheckoutIndexEntry = {
+  repoPath: string;
+  checkoutId: string;
+  createdAt: number;
+  lastSeenAt: number;
+  lastCommit: string | null;
+};
+
 export interface TasksProject {
   projectId(): Promise<string>;
   /** The project's repo catalog — paths a checkout can be opened against. */
   repos(): Promise<string[]>;
+  /** Every checkout anyone has opened, newest activity first (the sidebar). */
+  checkouts(): Promise<CheckoutIndexEntry[]>;
   /**
    * A capability on one collaborative checkout (creating it on first touch —
    * the underlying Durable Object seeds from the repo's HEAD task files).

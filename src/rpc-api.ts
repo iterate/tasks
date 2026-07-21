@@ -2,8 +2,10 @@ import { RpcTarget } from "capnweb";
 import { getServerByName } from "partyserver";
 import type { AppEnv } from "./board-do.ts";
 import { ProjectDial, type TasksCheckoutDurableObject } from "./checkout-do.ts";
+import type { TasksCheckoutIndexDurableObject } from "./checkout-index-do.ts";
 import type { CommitResult, TaskChangeSummary } from "./state.ts";
 import type {
+  CheckoutIndexEntry,
   CheckoutSnapshot,
   ProjectCredential,
   TasksApi,
@@ -16,6 +18,7 @@ const AUTH_COOKIE = "iterate-project-auth";
 
 export type VesselEnv = AppEnv & {
   CHECKOUT: DurableObjectNamespace<TasksCheckoutDurableObject>;
+  INDEX: DurableObjectNamespace<TasksCheckoutIndexDurableObject>;
 };
 
 /**
@@ -113,6 +116,10 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
       path: string;
     }>;
     return repos.map((repo) => repo.path).sort();
+  }
+
+  async checkouts(): Promise<CheckoutIndexEntry[]> {
+    return this.#env.INDEX.getByName(this.#projectId).list();
   }
 
   checkout(checkoutId: string, repoPath: string = DEFAULT_REPO_PATH): TasksCheckout {

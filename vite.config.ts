@@ -1,6 +1,7 @@
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import { cloudflare } from "@cloudflare/vite-plugin";
+import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import captunVite from "captun/vite";
 
@@ -33,6 +34,7 @@ export default defineConfig({
       : []),
     // The worker (src/worker.ts, with its TasksBoardDurableObject) runs in
     // workerd during dev; wrangler.jsonc declares the BOARD binding.
+    tailwindcss(),
     cloudflare({ viteEnvironment: { name: "ssr" } }),
     tanstackStart(),
     viteReact(),
