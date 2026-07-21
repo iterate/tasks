@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import appCss from "../styles.css?url";
 import { SidebarInset, SidebarProvider } from "../ui/sidebar.tsx";
+import { TooltipProvider } from "../ui/tooltip.tsx";
 import { AppSidebar } from "../components/app-sidebar.tsx";
 
 export const Route = createRootRoute({
@@ -24,12 +25,14 @@ export const Route = createRootRoute({
 function RootComponent() {
   return (
     <RootDocument>
-      <SidebarProvider className="h-svh">
-        <AppSidebar />
-        <SidebarInset className="min-w-0 overflow-hidden">
-          <Outlet />
-        </SidebarInset>
-      </SidebarProvider>
+      <TooltipProvider delay={0}>
+        <SidebarProvider className="h-svh">
+          <AppSidebar />
+          <SidebarInset className="min-w-0 overflow-hidden">
+            <Outlet />
+          </SidebarInset>
+        </SidebarProvider>
+      </TooltipProvider>
     </RootDocument>
   );
 }
