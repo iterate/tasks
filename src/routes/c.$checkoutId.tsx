@@ -499,7 +499,6 @@ function ReadyCheckout({
         taskChangeByPath={taskChangeByPath}
         presenceByPath={presenceByPath}
         recentByPath={recency.touches}
-        recentSpansByPath={recency.spans}
         onMove={moveTask}
         onAdd={addTask}
         onOpen={setOpenPath}

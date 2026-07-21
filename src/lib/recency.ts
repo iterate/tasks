@@ -89,14 +89,10 @@ export function useRecentTouches(doc: Y.Doc | null, active: boolean): RecencySta
                     ? "added"
                     : "edited";
               touches.set(key, { at: now, author, action });
-              if (action === "deleted") {
-                spans.delete(key);
-              } else {
-                // A set is a whole-content write (new file or replacement):
-                // the entire text is this author's fresh insertion.
-                const length = files.get(key)?.toString().length ?? 0;
-                spans.set(key, length > 0 ? [{ from: 0, to: length, author, at: now }] : []);
-              }
+              // Whole-content writes (new files, replacements) do NOT paint
+              // spans — a fully highlighted document is noise; the card's
+              // change state already says "new". Stale spans just clear.
+              spans.delete(key);
             }
           } else if (typeof event.path[0] === "string") {
             const path = event.path[0];

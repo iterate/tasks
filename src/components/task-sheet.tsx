@@ -84,7 +84,18 @@ export function TaskSheet({
         {task === null ? null : (
           <>
             <SheetHeader className="shrink-0 gap-1 border-b pr-12">
-              <SheetTitle className="truncate text-base">{task.title}</SheetTitle>
+              <SheetTitle className="flex items-center gap-2 text-base">
+                <span className="truncate">{task.title}</span>
+                {changeStatus === "added" ? (
+                  <span className="shrink-0 rounded-md bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-emerald-700 uppercase">
+                    New
+                  </span>
+                ) : changeStatus === "modified" ? (
+                  <span className="shrink-0 rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-800 uppercase">
+                    Edited
+                  </span>
+                ) : null}
+              </SheetTitle>
               <SheetDescription className="truncate font-mono text-xs">
                 {task.path}
               </SheetDescription>
