@@ -1,5 +1,31 @@
 # Proof-of-concept plan: collaborative workspaces end-to-end
 
+> **STATUS 2026-07-21: ALL FIVE PHASES PROVEN LOCALLY.** Worktrees:
+> `iterate-collab-poc` + `tasks-collab-poc` (branch `collab-poc` in both, off
+> origin/main, uncommitted). Results:
+> - **Phase 0**: `tasks-collab-poc/scripts/dev-local.sh` boots platform +
+>   vessel + header-stamping proxy in one command; board fully working
+>   against local platform (project `collab-poc`, browser-verified).
+> - **Phase 1**: `apps/os/src/domains/workspaces/collab-engine.ts` (~300
+>   lines, @codemirror/collab rebase model, WAL-before-ack via DO SQLite
+>   transactionSync) + `collab-engine.test.ts` fault harness — 11 tests green
+>   incl. 5-seed fuzz with mid-run crashes. The harness caught 2 real bugs
+>   (rebaseUpdates prefix-alignment; clientID casing). DO integration:
+>   readFile/writeFile/edit route through live docs; gitStatus/gitCommit
+>   barrier-settle; live-verified via itx CLI.
+> - **Phase 2**: vessel `collab()` capability forwarding to the platform
+>   workspace. Latency (local): hop (a) browser→vessel→workspace push p50
+>   5ms / deliver p50 6ms; direct (b) p50 2ms. Both fine; (b) is the prod
+>   answer. Session continuity across processes/restarts confirmed.
+> - **Phase 3**: two real browser tabs (CM6 + @codemirror/collab page at
+>   `/collab/<checkoutId>?path=...`) + agent via STANDARD `itx.workspace`
+>   `readFile`/`edit` — all three writers converged; agent saw live
+>   keystrokes in its read and its edit appeared live in both tabs.
+> - **Phase 4**: `probe-board.mjs` — board seeded via workspace `glob`,
+>   dirty via `gitStatus` (which settled an in-flight live edit), commit via
+>   `gitCommit` carrying that edit, overlay cleared, commit on main. No
+>   `meta.base`, no Y.Doc, no `listTaskFiles` anywhere on this path.
+
 Goal (Jonas, 2026-07-21): "a minimum sort of proof of concept of all this somehow …
 including through the extra hop of the tasks app. The task app doesn't have the
 workspaces in it so it sort of needs to proxy to them. … It needs to be ergonomic to do

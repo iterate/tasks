@@ -144,3 +144,9 @@ contested decisions to argue about.
   by adversarial review (1MiB WS cap wedges the workspace doc; every deploy = epoch;
   tombstones never GC; per-mount auth impossible). Top program risk: markdown↔ProseMirror
   fidelity. Yjs re-entry gate defined. PoC plan written → `poc-plan.md`.
+- 2026-07-21 (later): **PoC executed — all five phases green locally** (see the status
+  block in `poc-plan.md`). Rev 3 is now empirically validated end to end: rebase-model
+  engine survives its fault harness (which caught two real bugs before any UI existed),
+  agents co-edit through the unchanged `itx.workspace` API, checkout=workspace works with
+  the overlay as the only diff. Work lives uncommitted on `collab-poc` branches in the
+  `iterate-collab-poc` and `tasks-collab-poc` worktrees.

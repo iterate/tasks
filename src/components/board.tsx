@@ -1,5 +1,5 @@
 import { DragDropProvider, useDraggable, useDroppable } from "@dnd-kit/react";
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   CircleCheckIcon,
   CircleDashedIcon,
@@ -21,7 +21,7 @@ import {
   type PresenceUser,
   type RowField,
 } from "../lib/board-model.ts";
-import { agoText, type RecentTouch } from "../lib/recency.ts";
+import { agoText, type RecentSpan, type RecentTouch } from "../lib/recency.ts";
 
 /**
  * The board proper, in the apps/os repo-ide dialect: rows are folder
@@ -35,6 +35,7 @@ export function Board({
   taskChangeByPath,
   presenceByPath,
   recentByPath,
+  recentSpansByPath,
   onMove,
   onAdd,
   onOpen,
@@ -44,6 +45,7 @@ export function Board({
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
+  recentSpansByPath: Map<string, RecentSpan[]>;
   onMove: (task: BoardTask, state: string, folder: string, labels?: string[]) => void;
   onAdd: (state: string, folder: string | null) => void;
   onOpen: (path: string) => void;
@@ -115,6 +117,7 @@ export function Board({
                     taskChangeByPath={taskChangeByPath}
                     presenceByPath={presenceByPath}
                     recentByPath={recentByPath}
+                    recentSpansByPath={recentSpansByPath}
                     onAdd={onAdd}
                     onOpen={onOpen}
                   />
@@ -137,6 +140,7 @@ function BoardCell({
   taskChangeByPath,
   presenceByPath,
   recentByPath,
+  recentSpansByPath,
   onAdd,
   onOpen,
 }: {
@@ -148,6 +152,7 @@ function BoardCell({
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
+  recentSpansByPath: Map<string, RecentSpan[]>;
   onAdd: (state: string, folder: string | null) => void;
   onOpen: (path: string) => void;
 }) {
@@ -182,6 +187,7 @@ function BoardCell({
               changeStatus={taskChangeByPath.get(task.path)}
               presence={presenceByPath.get(task.path) ?? []}
               touch={recentByPath.get(task.path)}
+              spans={recentSpansByPath.get(task.path)}
               onOpen={onOpen}
             />
           ))}
@@ -206,6 +212,7 @@ function BoardCard({
   changeStatus,
   presence,
   touch,
+  spans,
   onOpen,
 }: {
   task: BoardTask;
@@ -213,6 +220,7 @@ function BoardCard({
   changeStatus: TaskChangeStatus | undefined;
   presence: PresenceUser[];
   touch: RecentTouch | undefined;
+  spans: RecentSpan[] | undefined;
   onOpen: (path: string) => void;
 }) {
   const { ref, isDragging } = useDraggable({
@@ -257,11 +265,13 @@ function BoardCard({
         </span>
       ) : null}
       <div className="flex items-start">
-        <span className="min-w-0 flex-1 text-sm leading-snug font-medium">{task.title}</span>
+        <span className="min-w-0 flex-1 text-sm leading-snug font-medium">
+          <HighlightedText text={task.title} offset={task.titleFrom} spans={spans} />
+        </span>
       </div>
       {task.summary === "" ? null : (
         <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-          {task.summary}
+          <HighlightedText text={task.summary} offset={task.summaryFrom} spans={spans} />
         </p>
       )}
       {task.labels.length > 0 ? (
@@ -286,6 +296,53 @@ function BoardCard({
       </TooltipContent>
     </Tooltip>
   );
+}
+
+/**
+ * A card string with the recently-inserted characters washed in their
+ * author's color — the same glow the editor shows, projected through the
+ * string's offset in the task's source.
+ */
+function HighlightedText({
+  text,
+  offset,
+  spans,
+}: {
+  text: string;
+  offset: number | null;
+  spans: RecentSpan[] | undefined;
+}) {
+  if (offset === null || spans === undefined || spans.length === 0 || text === "") {
+    return <>{text}</>;
+  }
+  const end = offset + text.length;
+  const overlapping = spans
+    .filter((span) => span.from < end && span.to > offset)
+    .sort((a, b) => a.from - b.from);
+  if (overlapping.length === 0) return <>{text}</>;
+  const segments: ReactNode[] = [];
+  let cursor = 0;
+  for (const span of overlapping) {
+    const from = Math.max(Math.max(0, span.from - offset), cursor);
+    const to = Math.min(text.length, span.to - offset);
+    if (to <= from) continue;
+    if (from > cursor) segments.push(text.slice(cursor, from));
+    segments.push(
+      <span
+        key={`${from}:${to}`}
+        style={{
+          backgroundColor: `${span.author.color}2e`,
+          borderBottom: `1.5px solid ${span.author.color}`,
+        }}
+        title={`${span.author.name} · ${agoText(span.at)}`}
+      >
+        {text.slice(from, to)}
+      </span>,
+    );
+    cursor = to;
+  }
+  if (cursor < text.length) segments.push(text.slice(cursor));
+  return <>{segments}</>;
 }
 
 export function TaskStateIcon({ state, className }: { state: string; className?: string }) {

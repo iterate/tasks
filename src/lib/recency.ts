@@ -16,67 +16,110 @@ export type RecentTouch = {
   action: "added" | "edited" | "deleted";
 };
 
+/** One recently-inserted run of characters, in file coordinates. */
+export type RecentSpan = { from: number; to: number; author: CollaboratorInfo; at: number };
+
+export type RecencyState = {
+  /** Last touch per task path — the card ring + hover line. */
+  touches: Map<string, RecentTouch>;
+  /** Recent insert ranges per task path — card text highlighting. */
+  spans: Map<string, RecentSpan[]>;
+};
+
+const EMPTY: RecencyState = { touches: new Map(), spans: new Map() };
+
 /**
- * Watch the files map for touches and remember, per task path, who touched
- * it last and when. Authors come from the transaction's own state-vector
- * diff (deletions from its delete set), resolved through the doc's
- * collaborators map. Own edits glow too — same as everyone else's, so the
- * feature is visible even solo. Entries expire after the TTL.
+ * Watch the files map and remember who touched which task when — both as a
+ * per-path "last touch" and as character ranges of recent insertions
+ * (remapped through subsequent edits, so highlights stay glued to their
+ * text). Own edits glow too. Everything expires after the TTL.
  */
-export function useRecentTouches(doc: Y.Doc | null, active: boolean): Map<string, RecentTouch> {
-  const [touches, setTouches] = useState<Map<string, RecentTouch>>(() => new Map());
+export function useRecentTouches(doc: Y.Doc | null, active: boolean): RecencyState {
+  const [state, setState] = useState<RecencyState>(EMPTY);
 
   useEffect(() => {
     if (doc === null || !active) return;
     const files = checkoutFilesMap(doc);
     let timer: ReturnType<typeof setTimeout> | null = null;
 
-    const schedule = (map: Map<string, RecentTouch>) => {
+    const schedule = (next: RecencyState) => {
       if (timer !== null) clearTimeout(timer);
       timer = null;
       let soonest = Infinity;
-      for (const touch of map.values()) soonest = Math.min(soonest, touch.at + RECENT_TOUCH_TTL_MS);
+      for (const touch of next.touches.values()) {
+        soonest = Math.min(soonest, touch.at + RECENT_TOUCH_TTL_MS);
+      }
       if (soonest !== Infinity) {
         timer = setTimeout(prune, Math.max(250, soonest - Date.now() + 50));
       }
     };
     const prune = () => {
-      setTouches((previous) => {
+      setState((previous) => {
         const now = Date.now();
-        const next = new Map(
-          [...previous].filter(([, touch]) => now - touch.at < RECENT_TOUCH_TTL_MS),
+        const touches = new Map(
+          [...previous.touches].filter(([, touch]) => now - touch.at < RECENT_TOUCH_TTL_MS),
         );
+        const spans = new Map<string, RecentSpan[]>();
+        for (const [path, list] of previous.spans) {
+          const kept = list.filter((span) => now - span.at < RECENT_TOUCH_TTL_MS);
+          if (kept.length > 0) spans.set(path, kept);
+        }
+        const next = { touches, spans };
         schedule(next);
         return next;
       });
     };
 
-    const observer = (events: Array<Y.YEvent<Y.AbstractType<unknown>>>, transaction: Y.Transaction) => {
+    const observer = (
+      events: Array<Y.YEvent<Y.AbstractType<unknown>>>,
+      transaction: Y.Transaction,
+    ) => {
       const author = transactionAuthor(doc, transaction);
       if (author === null) return;
       const now = Date.now();
-      const updates: Array<[string, RecentTouch]> = [];
-      for (const event of events) {
-        if (event.target === (files as unknown)) {
-          const mapEvent = event as unknown as Y.YMapEvent<unknown>;
-          for (const key of mapEvent.keysChanged) {
-            const change = mapEvent.changes.keys.get(key);
-            const action =
-              change?.action === "delete" ? "deleted" : change?.action === "add" ? "added" : "edited";
-            updates.push([key, { at: now, author, action }]);
+      setState((previous) => {
+        const touches = new Map(previous.touches);
+        const spans = new Map(previous.spans);
+        for (const event of events) {
+          if (event.target === (files as unknown)) {
+            const mapEvent = event as unknown as Y.YMapEvent<unknown>;
+            for (const key of mapEvent.keysChanged) {
+              const change = mapEvent.changes.keys.get(key);
+              const action =
+                change?.action === "delete"
+                  ? "deleted"
+                  : change?.action === "add"
+                    ? "added"
+                    : "edited";
+              touches.set(key, { at: now, author, action });
+              if (action === "deleted") {
+                spans.delete(key);
+              } else {
+                // A set is a whole-content write (new file or replacement):
+                // the entire text is this author's fresh insertion.
+                const length = files.get(key)?.toString().length ?? 0;
+                spans.set(key, length > 0 ? [{ from: 0, to: length, author, at: now }] : []);
+              }
+            }
+          } else if (typeof event.path[0] === "string") {
+            const path = event.path[0];
+            touches.set(path, { at: now, author, action: "edited" });
+            const remapped = remapSpans(spans.get(path) ?? [], event.delta);
+            let index = 0;
+            for (const op of event.delta) {
+              if (typeof op.retain === "number") index += op.retain;
+              else if (typeof op.insert === "string") {
+                remapped.push({ from: index, to: index + op.insert.length, author, at: now });
+                index += op.insert.length;
+              }
+            }
+            spans.set(path, remapped);
           }
-        } else if (typeof event.path[0] === "string") {
-          updates.push([event.path[0], { at: now, author, action: "edited" }]);
         }
-      }
-      if (updates.length > 0) {
-        setTouches((previous) => {
-          const next = new Map(previous);
-          for (const [path, touch] of updates) next.set(path, touch);
-          schedule(next);
-          return next;
-        });
-      }
+        const next = { touches, spans };
+        schedule(next);
+        return next;
+      });
     };
 
     files.observeDeep(observer);
@@ -86,7 +129,38 @@ export function useRecentTouches(doc: Y.Doc | null, active: boolean): Map<string
     };
   }, [doc, active]);
 
-  return touches;
+  return state;
+}
+
+/** Shift existing spans through one Yjs text delta so they track their text. */
+function remapSpans(
+  spans: RecentSpan[],
+  delta: Array<{ retain?: number; insert?: string | object; delete?: number }>,
+): RecentSpan[] {
+  let mapped = spans.map((span) => ({ ...span }));
+  let index = 0;
+  for (const op of delta) {
+    if (typeof op.retain === "number") {
+      index += op.retain;
+    } else if (typeof op.insert === "string") {
+      const length = op.insert.length;
+      for (const span of mapped) {
+        if (span.from >= index) span.from += length;
+        if (span.to > index) span.to += length;
+      }
+      index += length;
+    } else if (typeof op.delete === "number") {
+      const length = op.delete;
+      const shrink = (position: number) =>
+        position <= index ? position : Math.max(index, position - length);
+      for (const span of mapped) {
+        span.from = shrink(span.from);
+        span.to = shrink(span.to);
+      }
+      mapped = mapped.filter((span) => span.to > span.from);
+    }
+  }
+  return mapped;
 }
 
 /**

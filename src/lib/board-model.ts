@@ -7,6 +7,10 @@ export type BoardTask = TaskCard & {
   folder: string;
   /** First body line after the heading, for the card's excerpt. */
   summary: string;
+  /** Source offset of the rendered title (null when not from the heading). */
+  titleFrom: number | null;
+  /** Source offset of the summary line's first rendered character. */
+  summaryFrom: number;
 };
 
 export type PresenceUser = { name: string; color: string };
@@ -41,7 +45,21 @@ export function stateLabel(state: string): string {
 
 export function toBoardTask(path: string, source: string): BoardTask {
   const card = parseTaskCard(path, source);
-  return { ...card, folder: taskFolder(path), summary: taskSummary(source) };
+  const summary = taskSummary(source);
+  return {
+    ...card,
+    folder: taskFolder(path),
+    summary: summary.text,
+    summaryFrom: summary.from,
+    titleFrom: titleOffset(source, card.title),
+  };
+}
+
+/** Where the heading-derived title starts in the source, for highlighting. */
+function titleOffset(source: string, title: string): number | null {
+  const heading = /^#\s+(.+?)\s*#*\s*$/m.exec(source);
+  if (heading === null || heading[1] !== title) return null;
+  return heading.index + heading[0].indexOf(heading[1]!);
 }
 
 /** The path segments between the `tasks` directory and the filename. */
@@ -61,12 +79,21 @@ export function taskPathInFolder(path: string, folder: string): string {
   return folder === "/" ? `${prefix}/${filename}` : `${prefix}${folder}/${filename}`;
 }
 
-function taskSummary(source: string): string {
-  const body = source.replace(/^---[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/, "");
+function taskSummary(source: string): { text: string; from: number } {
+  const frontmatter = /^---[ \t]*\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(source);
+  const bodyOffset = frontmatter === null ? 0 : frontmatter[0].length;
+  const body = source.slice(bodyOffset);
+  let lineOffset = 0;
   for (const line of body.split("\n")) {
     const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-    return trimmed.length > 160 ? `${trimmed.slice(0, 160)}…` : trimmed;
+    if (trimmed !== "" && !trimmed.startsWith("#")) {
+      const from = bodyOffset + lineOffset + line.indexOf(trimmed);
+      return {
+        text: trimmed.length > 160 ? `${trimmed.slice(0, 160)}…` : trimmed,
+        from,
+      };
+    }
+    lineOffset += line.length + 1;
   }
-  return "";
+  return { text: "", from: bodyOffset };
 }

@@ -41,7 +41,7 @@ import {
   type PresenceUser,
   type RowField,
 } from "../lib/board-model.ts";
-import { useRecentTouches, type RecentTouch } from "../lib/recency.ts";
+import { useRecentTouches, type RecencyState } from "../lib/recency.ts";
 import { Board } from "../components/board.tsx";
 import { TaskSheet } from "../components/task-sheet.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
@@ -157,9 +157,10 @@ function CheckoutPage() {
   }, [provider, doc, awarenessVersion]);
 
   const ready = provider !== null && doc !== null && snapshot?.baseCommit !== undefined;
-  // Recency glows: who touched which task, since this viewer has been
-  // watching. Active only once synced so the initial load never glows.
-  const recentTouches = useRecentTouches(doc, ready);
+  // Recency glows: who touched which task (and which characters), since
+  // this viewer has been watching. Active only once synced so the initial
+  // load never glows.
+  const recency = useRecentTouches(doc, ready);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -172,7 +173,7 @@ function CheckoutPage() {
           snapshot={snapshot!}
           peers={peers}
           me={me}
-          recentTouches={recentTouches}
+          recency={recency}
           disconnected={status === "disconnected"}
         />
       ) : (
@@ -206,7 +207,7 @@ function ReadyCheckout({
   snapshot,
   peers,
   me,
-  recentTouches,
+  recency,
   disconnected,
 }: {
   checkoutId: string;
@@ -222,7 +223,7 @@ function ReadyCheckout({
   };
   peers: Peer[];
   me: TasksUser | null;
-  recentTouches: Map<string, RecentTouch>;
+  recency: RecencyState;
   disconnected: boolean;
 }) {
   const { files, base, baseCommit, tasks, taskChanges } = snapshot;
@@ -481,7 +482,8 @@ function ReadyCheckout({
         rowField={rowField}
         taskChangeByPath={taskChangeByPath}
         presenceByPath={presenceByPath}
-        recentByPath={recentTouches}
+        recentByPath={recency.touches}
+        recentSpansByPath={recency.spans}
         onMove={moveTask}
         onAdd={addTask}
         onOpen={setOpenPath}
