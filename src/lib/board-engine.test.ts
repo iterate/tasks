@@ -71,3 +71,21 @@ describe("matchesFilter", () => {
     expect(matchesFilter(task, "nope")).toBe(false);
   });
 });
+
+describe("frontmatter resilience", () => {
+  it("treats broken YAML as plain text and flags it", () => {
+    const task = toBoardTask(
+      "tasks/broken.md",
+      "---\nstate: todo\ntags: [unclosed\n---\n\n# Broken\n\nBody.\n",
+    );
+    expect(task.frontmatterError).toBe(true);
+    expect(task.labels).toEqual([]);
+    expect(task.state).toBe("todo");
+    expect(task.title).toBe("Broken");
+  });
+
+  it("uses the full path as title when there is no heading", () => {
+    const task = toBoardTask("tasks/sub/quiet.md", "---\nstate: todo\n---\n\nJust body text.\n");
+    expect(task.title).toBe("tasks/sub/quiet.md");
+  });
+});

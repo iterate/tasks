@@ -411,6 +411,10 @@ function ReadyCheckout({
   };
 
   const columns = useMemo(() => columnsForTasks(tasks).map((column) => column.state), [tasks]);
+  const allTags = useMemo(
+    () => [...new Set(tasks.flatMap((task) => task.labels))].sort((a, b) => a.localeCompare(b)),
+    [tasks],
+  );
   const openTask = openPath === null ? null : (tasks.find((task) => task.path === openPath) ?? null);
 
   // While the draft's sheet is open and it is still an uncommitted add, its
@@ -515,8 +519,12 @@ function ReadyCheckout({
               : "select"
             : undefined
         }
+        allTags={allTags}
         onChangeState={(state) => {
           if (openTask !== null) writeTask(openTask.path, setTaskCardState(openTask.source, state));
+        }}
+        onChangeLabels={(labels) => {
+          if (openTask !== null) writeTask(openTask.path, setTaskCardLabels(openTask.source, labels));
         }}
         onAssignAgent={async () => {
           if (openTask !== null) await assignAgentOp(checkoutId, repoPath, openTask.path);

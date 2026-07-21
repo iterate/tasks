@@ -12,6 +12,9 @@ export type TaskCard = {
   agent: string | null;
   /** Full markdown source of the file (frontmatter included) for the detail editor. */
   source: string;
+  /** True when the file HAS a frontmatter block but its YAML fails to
+   * parse — the file is then treated as plain text (no state/tags). */
+  frontmatterError: boolean;
 };
 
 /** The canonical Kanban columns, in board order. Custom states get their own column after these. */

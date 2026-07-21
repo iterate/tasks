@@ -24,17 +24,31 @@ export function isTaskFilePath(path: string): boolean {
  */
 export function parseTaskCard(path: string, source: string): TaskCard {
   const frontmatter = parseMarkdownFrontmatter(source);
+  if (frontmatter.invalid) {
+    // Broken YAML: the whole file is plain text — no state, no tags, and
+    // the UI surfaces the breakage instead of guessing.
+    return {
+      path,
+      title: firstHeadingTitle(source) ?? path,
+      state: normalizeTaskState(undefined),
+      labels: [],
+      agent: null,
+      source,
+      frontmatterError: true,
+    };
+  }
   const metadata = markdownFrontmatterRecord(frontmatter.document);
-  const fallbackTitle = (pathSegments(path).at(-1) ?? "task").replace(/\.(?:md|markdown)$/i, "");
   return {
     path,
-    title: stringValue(metadata.title) ?? firstHeadingTitle(frontmatter.body) ?? fallbackTitle,
+    // A task with no heading (and no title key) is named by its full path.
+    title: stringValue(metadata.title) ?? firstHeadingTitle(frontmatter.body) ?? path,
     state: normalizeTaskState(stringValue(metadata.state)),
     // `tags` is the canonical key; `labels` stays readable for apps/os
     // compatibility and older files.
     labels: uniqueStrings([...stringArray(metadata.tags), ...stringArray(metadata.labels)]),
     agent: stringValue(metadata.agent) ?? null,
     source,
+    frontmatterError: false,
   };
 }
 
@@ -205,13 +219,18 @@ function parseMarkdownFrontmatter(content: string): {
   body: string;
   document: Document;
   exists: boolean;
+  invalid: boolean;
 } {
   const match = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(content);
-  if (match === null) return { body: content, document: parseDocument(""), exists: false };
+  if (match === null) {
+    return { body: content, document: parseDocument(""), exists: false, invalid: false };
+  }
+  const document = parseDocument(match[1] ?? "");
   return {
     body: content.slice(match[0].length),
-    document: parseDocument(match[1] ?? ""),
+    document,
     exists: true,
+    invalid: document.errors.length > 0,
   };
 }
 

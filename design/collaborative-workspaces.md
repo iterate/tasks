@@ -150,3 +150,25 @@ contested decisions to argue about.
   agents co-edit through the unchanged `itx.workspace` API, checkout=workspace works with
   the overlay as the only diff. Work lives uncommitted on `collab-poc` branches in the
   `iterate-collab-poc` and `tasks-collab-poc` worktrees.
+- 2026-07-21 (thermo-nuclear review round): two independent reviewers (Cursor
+  thermo-nuclear skill via sub-agent; Codex gpt-5.6-sol xhigh) both returned **BLOCK**
+  with converging findings. Top code-judo (both): liveness must be DURABLE state, not
+  memory — after DO eviction the old design silently committed stale overlays and could
+  stomp agent writes. **Applied**: new `collab-host.ts` coordinator with a
+  `collab_sessions` table (head_version/overlay_version), `reconcile()` as the single
+  barrier primitive (status/commit/configure), destructive ops end sessions durably,
+  idle sweep, size gates (2MB SQLite cell cap → MAX_DOC_BYTES 1MB open refusal +
+  MAX_PUSH_BYTES typed `too-large`), one acceptance primitive in the engine (push +
+  applyExternal unified), open-race fix, op-log compaction + clientSeq LRU, canonical
+  edit helpers ($&-literal bug fixed), waiter cleanup, path canonicalization, vessel
+  consolidation (one `TasksWorkspaceApi`, typed wire, bounded board reads), client
+  hardening (typed push switch, bounded backoff, snapshot reseed that CARRIES
+  unconfirmed edits — no reload, no silent discard). 84 platform tests green (26
+  collab-specific incl. crash-into-commit, $&, idle-end, size gates); all live probes
+  re-verified (hop p50 2-3ms, direct p50 2ms). **Deliberately deferred**: platform-side
+  filtered board snapshot (workspace listTaskFiles equivalent — the glob+read board seed
+  stays PoC-shaped with a concurrency cap), workerd-level DO tests, epoch-rotation
+  client recovery beyond best-effort carry, R2 spill for >1MB collab docs.
+- 2026-07-21: Feature-layer design written → `redlines-and-comments.md` (redlines as a
+  fold of the op log — @codemirror/merge path 1, attributed-segments path 2; comments as
+  sidecar anchors mapped through accepted ops with snippet re-anchoring across epochs).

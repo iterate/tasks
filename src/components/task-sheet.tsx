@@ -7,6 +7,7 @@ import type { TaskChangeStatus } from "../state.ts";
 import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
 import type { RecentSpan } from "../lib/recency.ts";
 import { TaskStateIcon } from "./board.tsx";
+import { TagPicker } from "./tag-picker.tsx";
 
 // CodeMirror (plus the Yjs binding) is by far the heaviest thing this app
 // ships; it only matters once a task sheet opens, so it loads on demand.
@@ -49,7 +50,9 @@ export function TaskSheet({
   changeStatus,
   focusHeadline,
   initialSpans,
+  allTags,
   onChangeState,
+  onChangeLabels,
   onAssignAgent,
   onRevert,
   onDelete,
@@ -63,7 +66,9 @@ export function TaskSheet({
   changeStatus: TaskChangeStatus | undefined;
   focusHeadline?: "select" | "end";
   initialSpans?: RecentSpan[];
+  allTags: string[];
   onChangeState: (state: string) => void;
+  onChangeLabels: (labels: string[]) => void;
   onAssignAgent: () => Promise<void>;
   onRevert: () => void;
   onDelete: () => void;
@@ -88,6 +93,7 @@ export function TaskSheet({
               <Select
                 items={columns.map((state) => ({ label: stateLabel(state), value: state }))}
                 value={columnState(task, columns)}
+                disabled={task.frontmatterError}
                 onValueChange={(value) => {
                   if (typeof value === "string" && value !== "") onChangeState(value);
                 }}
@@ -106,6 +112,12 @@ export function TaskSheet({
                   ))}
                 </SelectContent>
               </Select>
+              <TagPicker
+                value={task.labels}
+                options={allTags}
+                disabled={task.frontmatterError}
+                onChange={onChangeLabels}
+              />
               {presence.length > 0 ? (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground">
                   {presence.map((user, index) => (
@@ -196,6 +208,12 @@ export function TaskSheet({
                 </AlertDialog>
               </div>
             </div>
+            {task.frontmatterError ? (
+              <p className="shrink-0 border-b bg-destructive/10 px-4 py-1.5 text-xs text-red-700">
+                Broken YAML frontmatter — this file is being treated as plain text (no state, no
+                tags). Fix the <code className="font-mono">---</code> block to restore them.
+              </p>
+            ) : null}
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-3">
               {text === undefined ? (
                 <p className="p-4 text-sm text-muted-foreground">This task no longer exists.</p>

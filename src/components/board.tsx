@@ -139,6 +139,8 @@ export function Board({
                     state={cell.state}
                     rowKey={row.key}
                     rowValue={row.value}
+                    showTags={rowField !== "label"}
+                    showFolder={rowField !== "folder"}
                     tasks={cell.tasks}
                     taskChangeByPath={taskChangeByPath}
                     presenceByPath={presenceByPath}
@@ -161,6 +163,8 @@ function BoardCell({
   state,
   rowKey,
   rowValue,
+  showTags,
+  showFolder,
   tasks,
   taskChangeByPath,
   presenceByPath,
@@ -172,6 +176,8 @@ function BoardCell({
   state: string;
   rowKey: string;
   rowValue: string | null;
+  showTags: boolean;
+  showFolder: boolean;
   tasks: BoardTask[];
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
@@ -199,6 +205,8 @@ function BoardCell({
               key={task.path}
               task={task}
               rowKey={rowKey}
+              showTags={showTags}
+              showFolder={showFolder}
               changeStatus={taskChangeByPath.get(task.path)}
               presence={presenceByPath.get(task.path) ?? []}
               touch={recentByPath.get(task.path)}
@@ -224,6 +232,8 @@ function BoardCell({
 function BoardCard({
   task,
   rowKey,
+  showTags,
+  showFolder,
   changeStatus,
   presence,
   touch,
@@ -232,6 +242,8 @@ function BoardCard({
 }: {
   task: BoardTask;
   rowKey: string;
+  showTags: boolean;
+  showFolder: boolean;
   changeStatus: TaskChangeStatus | undefined;
   presence: PresenceUser[];
   touch: RecentTouch | undefined;
@@ -289,13 +301,21 @@ function BoardCard({
           <HighlightedText text={task.summary} offset={task.summaryFrom} spans={spans} />
         </p>
       )}
-      {task.labels.length > 0 ? (
+      {(showTags && task.labels.length > 0) || (showFolder && task.folder !== "/") ? (
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
-          {task.labels.map((label) => (
-            <Badge key={label} variant="secondary">
-              {label}
+          {showFolder && task.folder !== "/" ? (
+            <Badge variant="outline" className="gap-1 font-mono">
+              <FolderIcon aria-hidden className="size-3" />
+              {task.folder}
             </Badge>
-          ))}
+          ) : null}
+          {showTags
+            ? task.labels.map((label) => (
+                <Badge key={label} variant="secondary">
+                  {label}
+                </Badge>
+              ))
+            : null}
         </div>
       ) : null}
     </button>
