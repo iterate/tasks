@@ -193,8 +193,6 @@ function BoardCard({
     id: `card:${encodeURIComponent(task.path)}:${encodeURIComponent(rowKey)}`,
     type: "task",
   });
-  const changeLabel =
-    changeStatus === "added" ? "new" : changeStatus === "modified" ? "edited" : undefined;
   return (
     <button
       type="button"
@@ -210,21 +208,17 @@ function BoardCard({
       }
       className={cn(
         "relative w-full cursor-grab rounded-md border border-border/70 bg-card p-2.5 text-left transition-[background-color,border-color,box-shadow,opacity] hover:bg-accent/40 active:cursor-grabbing",
-        changeStatus === "added" && "border-emerald-500/50 bg-emerald-500/[0.04]",
-        changeStatus === "modified" && "border-amber-500/50 bg-amber-500/[0.04]",
         isDragging && "opacity-40",
       )}
     >
-      {changeLabel === undefined ? null : (
+      {changeStatus === undefined ? null : (
         <span
+          title={changeStatus === "added" ? "New — uncommitted" : "Edited — uncommitted"}
           className={cn(
-            "absolute top-2 right-2 rounded-md px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase",
-            changeStatus === "added" && "bg-emerald-500/15 text-emerald-700",
-            changeStatus === "modified" && "bg-amber-500/15 text-amber-800",
+            "absolute top-2.5 right-2.5 size-1.5 rounded-full",
+            changeStatus === "added" ? "bg-emerald-500" : "bg-amber-500",
           )}
-        >
-          {changeLabel}
-        </span>
+        />
       )}
       {presence.length > 0 ? (
         <span className="absolute right-2 bottom-2 flex -space-x-1">
@@ -238,7 +232,7 @@ function BoardCard({
           ))}
         </span>
       ) : null}
-      <div className={cn("flex items-start", changeLabel !== undefined && "pr-12")}>
+      <div className={cn("flex items-start", changeStatus !== undefined && "pr-4")}>
         <span className="min-w-0 flex-1 text-sm leading-snug font-medium">{task.title}</span>
       </div>
       {task.summary === "" ? null : (

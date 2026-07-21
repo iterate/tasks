@@ -187,15 +187,16 @@ export function DeletedTasksStrip({
 }) {
   if (deletedChanges.length === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b bg-background px-3 py-1.5">
+    <div className="flex flex-wrap items-center justify-end gap-2 border-b bg-background px-3 py-1">
       <span className="text-xs text-muted-foreground">Deleted</span>
       {deletedChanges.map((change) => (
         <span
           key={change.path}
           title={change.path}
-          className="inline-flex items-center gap-1.5 rounded-full border border-red-600/30 bg-red-600/10 py-0.5 pr-1 pl-2.5 text-xs text-red-700"
+          className="inline-flex items-center gap-1.5 rounded-full border py-0.5 pr-1 pl-2.5 text-xs text-muted-foreground"
         >
-          {change.title}
+          <span className="size-1.5 rounded-full bg-red-500" aria-hidden />
+          <span className="line-through">{change.title}</span>
           <Button
             variant="ghost"
             size="sm"
