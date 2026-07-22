@@ -15,7 +15,7 @@ import { Button } from "../ui/button.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { taskColumnState } from "../tasks-model.ts";
-import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
+import { stateLabel, type BoardTask, type PresenceUser, type RowField } from "../lib/board-model.ts";
 import type { BoardProjection } from "../lib/board-engine.ts";
 import { agoText, type RecentTouch } from "../lib/recency.ts";
 
@@ -39,7 +39,7 @@ export function Board({
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
   onMove: (task: BoardTask, state: string, folder: string, labels?: string[]) => void;
-  onAdd: (state: string, folder: string | null) => void;
+  onAdd: (state: string, folder: string | null, label?: string) => void;
   onOpen: (path: string) => void;
 }) {
   const { rowField, rows, columns, filterActive } = projection;
@@ -143,6 +143,7 @@ export function Board({
                 {row.cells.map((cell) => (
                   <BoardCell
                     key={cell.state}
+                    rowField={rowField}
                     state={cell.state}
                     rowKey={row.key}
                     rowValue={row.value}
@@ -169,6 +170,7 @@ export function Board({
 const CELL_PAGE = 60;
 
 function BoardCell({
+  rowField,
   state,
   rowKey,
   rowValue,
@@ -181,6 +183,7 @@ function BoardCell({
   onAdd,
   onOpen,
 }: {
+  rowField: RowField;
   state: string;
   rowKey: string;
   rowValue: string | null;
@@ -190,7 +193,7 @@ function BoardCell({
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
-  onAdd: (state: string, folder: string | null) => void;
+  onAdd: (state: string, folder: string | null, label?: string) => void;
   onOpen: (path: string) => void;
 }) {
   const { ref, isDropTarget } = useDroppable({
@@ -240,7 +243,16 @@ function BoardCell({
           size="sm"
           aria-label="New task"
           className="mt-1 h-8 w-full justify-center text-muted-foreground/60 opacity-0 transition-opacity group-hover/cell:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-          onClick={() => onAdd(state, rowValue)}
+          onClick={() =>
+            // A row value is a FOLDER only under folder grouping; under label
+            // grouping it's a tag — the new task goes to the default folder
+            // and wears the row's tag instead.
+            onAdd(
+              state,
+              rowField === "folder" ? rowValue : null,
+              rowField === "label" ? (rowValue ?? undefined) : undefined,
+            )
+          }
         >
           <PlusIcon aria-hidden className="size-4" />
         </Button>

@@ -79,8 +79,11 @@ function WorkspaceBoardPage() {
   const editorApiRef = useRef<CollabEditorApi | null>(null);
   // Paths claimed by mutations THIS RENDER: board.files is async React
   // state, so two rapid adds/moves in one frame would both see it stale and
-  // collapse onto one filename without this synchronous guard.
-  const claimedRef = useRef(new Set<string>());
+  // collapse onto one filename without this synchronous guard. Claims are
+  // short-lived reservations (they bridge until the optimistic write shows
+  // up in board.files) — a TTL lets deleted/renamed/failed paths free their
+  // names again instead of forcing -2/-3 suffixes forever.
+  const claimedRef = useRef(new Map<string, number>());
   // Fresh board state for timers/claims WITHOUT depending on the board
   // object (recreated every render — depending on it would reset debounces
   // on every keystroke reflect and poll tick).
@@ -89,11 +92,15 @@ function WorkspaceBoardPage() {
     boardRef.current = board;
   });
   const claimPath = useCallback((desired: string): string => {
+    const now = Date.now();
+    for (const [path, at] of claimedRef.current) {
+      if (now - at > 5_000) claimedRef.current.delete(path);
+    }
     const target = unclaimedPath(
       desired,
       (path) => boardRef.current.files?.[path] !== undefined || claimedRef.current.has(path),
     );
-    claimedRef.current.add(target);
+    claimedRef.current.set(target, now);
     return target;
   }, []);
 
@@ -200,10 +207,14 @@ function WorkspaceBoardPage() {
   );
 
   const addTask = useCallback(
-    (state: string, folder: string | null) => {
+    (state: string, folder: string | null, label?: string) => {
       // Rapid adds must not collapse: number the TITLE (New task 2, …) so
       // the path, the heading, and the later title-trailing rename all
       // stay distinct.
+      const now = Date.now();
+      for (const [path, at] of claimedRef.current) {
+        if (now - at > 5_000) claimedRef.current.delete(path);
+      }
       const taken = (path: string) =>
         board.files?.[path] !== undefined || claimedRef.current.has(path);
       let title = "New task";
@@ -214,8 +225,10 @@ function WorkspaceBoardPage() {
         file = newTaskFile({ state, title });
         target = taskPathInFolder(file.path, folder ?? "tasks");
       }
-      claimedRef.current.add(target);
-      board.writeTask(target, file.content);
+      claimedRef.current.set(target, now);
+      // Adding from a tag row: the task wears that tag from birth.
+      const content = label === undefined ? file.content : setTaskCardLabels(file.content, [label]);
+      board.writeTask(target, content);
       renamedDraftRef.current = false;
       setDraftPath(target);
       patchSearch({ task: target });
