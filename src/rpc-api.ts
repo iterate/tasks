@@ -455,11 +455,12 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       const contents = await ws.readFiles(paths);
       // Keys leave here repo-relative (no leading slash) — one shape for
       // every consumer; reads/writes prepend the platform slash themselves.
+      // Null reads (vanished between glob and read, transient failure) are
+      // SKIPPED, never seeded as phantom empty cards.
       return Object.fromEntries(
-        Object.entries(contents).map(([path, content]) => [
-          path.replace(/^\/+/, ""),
-          content ?? "",
-        ]),
+        Object.entries(contents).flatMap(([path, content]) =>
+          content === null ? [] : [[path.replace(/^\/+/, ""), content]],
+        ),
       );
     });
   }
