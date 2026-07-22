@@ -122,6 +122,16 @@ function dialTasksApi() {
 
 let liveApi: ReturnType<typeof dialTasksApi> | null = null;
 
+/** One try on the LIVE session, no dispose/redial on failure — for
+ * best-effort work (teardown flushes) that must never tear down the shared
+ * WS under the poll and wait loops riding it. */
+export async function withProjectOnce<T>(
+  operation: (project: ReturnType<typeof dialTasksApi>["project"]) => PromiseLike<T>,
+): Promise<T> {
+  liveApi ??= dialTasksApi();
+  return operation(liveApi.project);
+}
+
 export async function withProject<T>(
   operation: (project: ReturnType<typeof dialTasksApi>["project"]) => PromiseLike<T>,
 ): Promise<T> {

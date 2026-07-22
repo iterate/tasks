@@ -7,7 +7,7 @@ import {
 } from "@codemirror/collab";
 import { ChangeSet, type Extension } from "@codemirror/state";
 import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
-import { withProject } from "./use-checkout.ts";
+import { withProject, withProjectOnce } from "./use-checkout.ts";
 import type { CollabChanges, CollabWaitResult, TasksWorkspace } from "./tasks-api.ts";
 
 /**
@@ -76,6 +76,24 @@ export class CollabConnection {
       clientSeq: this.confirmed + index,
     }));
     return withProject((project) =>
+      this.#lane(project).push({
+        baseVersion,
+        clientId: this.clientId,
+        epoch: this.epoch,
+        ops,
+        path: this.filePath,
+      }),
+    );
+  }
+
+  /** One quiet try on the live session — never disposes the shared WS
+   * (teardown flushes must not tear down the poll/wait loops). */
+  async pushOnce(baseVersion: number, updates: readonly Update[]) {
+    const ops = updates.map((update, index) => ({
+      changes: update.changes.toJSON(),
+      clientSeq: this.confirmed + index,
+    }));
+    return withProjectOnce((project) =>
       this.#lane(project).push({
         baseVersion,
         clientId: this.clientId,
@@ -241,7 +259,10 @@ export function peerExtension(connection: CollabConnection, startVersion: number
         if (!this.done && !this.recovering) {
           const pending = sendableUpdates(this.view.state);
           if (pending.length > 0) {
-            void connection.push(getSyncedVersion(this.view.state), pending).catch(() => {});
+            // ONE quiet try on the live session: a failure here must never
+            // dispose the shared WS (withProject's retry would), which was
+            // tearing down the poll/wait loops on every editor remount.
+            void connection.pushOnce(getSyncedVersion(this.view.state), pending).catch(() => {});
           }
         }
         this.done = true;
