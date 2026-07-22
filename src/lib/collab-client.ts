@@ -212,6 +212,13 @@ export function peerExtension(connection: CollabConnection, startVersion: number
             }
             if (result.ops.length === 0) continue;
             this.view.dispatch(receiveUpdates(this.view.state, connection.absorb(result.ops)));
+            if (this.recovering) {
+              // History was intact after all — catching up via ops advanced
+              // our base past the miss, so pushing can resume (the snapshot
+              // lane only handles the truly-lost case).
+              this.recovering = false;
+              void this.push();
+            }
           } catch (error) {
             if (this.done) break;
             this.failures++;

@@ -85,8 +85,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   // badges on the same tick; poll errors surface instead of vanishing.
   const versionsRef = useRef<Record<string, number>>({});
   const tickRef = useRef(0);
-  // Bumped by every optimistic mutation: an in-flight status() response from
-  // BEFORE the mutation must not overwrite the newer local badges.
+  // Bumped by EVERY local mutation (writes, deletes, live keystrokes,
+  // reverts, commits): an in-flight poll response from before the mutation
+  // must not overwrite newer local state — badges OR file content. The next
+  // tick reconciles with server truth.
   const mutationEpoch = useRef(0);
   useEffect(() => {
     const mine = generation.current;
@@ -123,7 +125,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
             ),
           );
           if (generation.current !== mine) return;
-          if (status !== null && mutationEpoch.current === epochBefore) setChanges(next);
+          // One epoch check for BOTH maps: fetched content that started
+          // before a local mutation is as stale as its badges.
+          if (mutationEpoch.current !== epochBefore) return;
+          if (status !== null) setChanges(next);
           setFiles((current) => {
             if (current === null) return current;
             const merged = { ...current };
@@ -213,6 +218,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   /** Live content from an open editor session — keeps the card current
    * while typing without waiting for the flush + poll round trip. */
   const reflectLiveContent = useCallback((path: string, content: string) => {
+    mutationEpoch.current++;
     setFiles((current) => {
       if (current === null || current[path] === content) return current;
       // A live edit IS dirtiness: commit controls must arm on the first
@@ -251,8 +257,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   /** Back to the mount's version — restore a delete, drop an add, undo edits. */
   const revertTask = useCallback(
     (path: string) => {
+      mutationEpoch.current++;
       void lane(async (ws) => {
         await ws.revert(`/${path}`);
+        mutationEpoch.current++;
         const content = await ws.read(`/${path}`);
         setFiles((current) => {
           if (current === null) return current;
@@ -279,11 +287,15 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
 
   const commit = useCallback(
     async (message: string) => {
+      mutationEpoch.current++;
       const result = await lane((ws) => ws.commit(message));
       const [seeded, status] = await Promise.all([
         lane((ws) => ws.files()),
         lane((ws) => ws.status()),
       ]);
+      // The refetch is the fresh truth; bump again so a poll that started
+      // mid-commit can't wipe the post-commit clean state.
+      mutationEpoch.current++;
       // Same key normalization as the seed — mixed-shape keys would orphan
       // badges and duplicate cards after the first commit.
       setFiles(Object.fromEntries(Object.entries(seeded).map(([path, c]) => [boardKey(path), c])));
