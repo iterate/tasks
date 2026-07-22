@@ -242,7 +242,13 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         return current === null ? current : { ...current, [path]: content };
       });
       return lane((ws) => ws.write(`/${path}`, content)).then(
-        () => true,
+        () => {
+          // Close the race window: a poll that STARTED during this RPC read
+          // pre-write state — the landing bump makes its apply-time check
+          // fail instead of wiping the optimistic card.
+          mutationEpoch.current++;
+          return true;
+        },
         (cause: unknown) => {
           restoreOnFailure(path, priorContent, priorChange)(cause);
           return false;
@@ -275,8 +281,11 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       });
       // The workspace still has the file on failure — put the card (and its
       // badge) back instead of pretending the delete happened.
-      void lane((ws) => ws.delete(`/${path}`)).catch((cause: unknown) =>
-        restoreOnFailure(path, priorContent, priorChange)(cause),
+      void lane((ws) => ws.delete(`/${path}`)).then(
+        () => {
+          mutationEpoch.current++; // see writeTask — cover the whole window
+        },
+        (cause: unknown) => restoreOnFailure(path, priorContent, priorChange)(cause),
       );
     },
     [lane, restoreOnFailure],
@@ -369,7 +378,12 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       } catch {
         // The carry is best-effort; the source still gets deleted below.
       }
-      void lane((ws) => ws.delete(`/${fromPath}`)).catch(() => {});
+      void lane((ws) => ws.delete(`/${fromPath}`)).then(
+        () => {
+          mutationEpoch.current++; // a poll mid-delete read fromPath alive
+        },
+        () => {},
+      );
       return null;
     },
     [lane],
