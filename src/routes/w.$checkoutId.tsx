@@ -337,6 +337,11 @@ function WorkspaceBoardPage() {
           setDraftPath(target);
           patchSearch({ task: target });
         })
+        .then((error) => {
+          // A failed rename left the draft in place — keep trailing the
+          // title instead of stalling until it changes again.
+          if (error !== null) timer = setTimeout(attempt, 700);
+        })
         .finally(() => {
           renamingRef.current = false;
         });

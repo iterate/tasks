@@ -234,6 +234,16 @@ export function peerExtension(connection: CollabConnection, startVersion: number
       }
 
       destroy() {
+        // Best-effort final flush: unpushed edits still in the doc would die
+        // with the view (the board may already show them via the live
+        // reflector). Safe to fire even beside an in-flight push — the
+        // server dedupes by (clientId, clientSeq).
+        if (!this.done && !this.recovering) {
+          const pending = sendableUpdates(this.view.state);
+          if (pending.length > 0) {
+            void connection.push(getSyncedVersion(this.view.state), pending).catch(() => {});
+          }
+        }
         this.done = true;
       }
     },
