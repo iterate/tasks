@@ -390,7 +390,7 @@ function ReadyCheckout({
     });
     if (openPath === task.path) setOpenPath(nextPath);
   };
-  const addTask = (state: string, folder: string | null) => {
+  const addTask = (state: string, folder: string | null, label?: string) => {
     const reserved = new Set([...Object.keys(files), ...Object.keys(base)]);
     let file = newTaskFile({
       title: "New task",
@@ -401,7 +401,10 @@ function ReadyCheckout({
       file = { ...file, path: taskPathForTitle("New task", `${suffix}`) };
     }
     const path = inFolder(file.path, folder);
-    filesMap.set(path, new Y.Text(file.content));
+    // Adding from a tag row: the task wears that tag from birth (parity
+    // with the workspace board).
+    const content = label === undefined ? file.content : setTaskCardLabels(file.content, [label]);
+    filesMap.set(path, new Y.Text(content));
     renamedDraftRef.current = false;
     setDraftPath(path);
     setOpenPath(path);
