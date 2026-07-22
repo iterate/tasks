@@ -312,7 +312,9 @@ function WorkspaceBoardPage() {
     const desired = taskPathInFolder(taskPathForTitle(draftTitle), draftFolder);
     if (desired === draftPath) return;
     let timer: ReturnType<typeof setTimeout>;
+    let cancelled = false;
     const attempt = () => {
+      if (cancelled) return;
       // Another rename lane holds the lock (a drag, a path edit on another
       // task): re-arm instead of stalling until the next title change.
       if (renamingRef.current) {
@@ -339,15 +341,19 @@ function WorkspaceBoardPage() {
         })
         .then((error) => {
           // A failed rename left the draft in place — keep trailing the
-          // title instead of stalling until it changes again.
-          if (error !== null) timer = setTimeout(attempt, 700);
+          // title instead of stalling until it changes again. Never past
+          // this effect's cleanup: a newer title owns the next attempt.
+          if (error !== null && !cancelled) timer = setTimeout(attempt, 700);
         })
         .finally(() => {
           renamingRef.current = false;
         });
     };
     timer = setTimeout(attempt, 700);
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [draftPath, draftTitle, draftFolder, claimPath, patchSearch, sourceOf]);
 
   // The sheet's path field: any rename the board can represent is allowed —
