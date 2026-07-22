@@ -121,10 +121,16 @@ export class TasksCheckoutDurableObject extends YServer {
       for (let start = 0; start < taskPaths.length; start += lane) {
         await Promise.all(
           taskPaths.slice(start, start + lane).map(async (entry) => {
-            const file = (await repo.readFile({ commitOid, path: entry.path })) as {
-              content: string;
-            };
-            files[entry.key] = file.content;
+            // Tolerate per-file failures (deleted between list and read,
+            // transient RPC): one bad file must not block the whole seed.
+            try {
+              const file = (await repo.readFile({ commitOid, path: entry.path })) as {
+                content: string;
+              } | null;
+              if (file !== null) files[entry.key] = file.content;
+            } catch {
+              // skipped — the poll/commit lanes reconcile it later
+            }
           }),
         );
       }

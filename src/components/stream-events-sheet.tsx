@@ -148,7 +148,11 @@ export function StreamEventsSheet({
         >
           {events.length === 0 ? (
             <p className="p-4 text-sm text-muted-foreground">
-              {status === "connecting" ? "Connecting…" : "No events yet."}
+              {status === "connecting"
+                ? "Connecting…"
+                : status === "live"
+                  ? "No events yet."
+                  : `Subscription failed: ${status}`}
             </p>
           ) : (
             events.map((event) => (

@@ -37,6 +37,10 @@ if ! curl -sf "http://localhost:$TASKS_PORT/healthz" >/dev/null 2>&1; then
     curl -sf "http://localhost:$TASKS_PORT/healthz" >/dev/null 2>&1 && break
     sleep 0.5
   done
+  if ! curl -sf "http://localhost:$TASKS_PORT/healthz" >/dev/null 2>&1; then
+    echo "vessel failed to become healthy on :$TASKS_PORT — see /tmp/tasks-dev.log" >&2
+    exit 1
+  fi
 fi
 echo "vessel:   http://localhost:$TASKS_PORT"
 
