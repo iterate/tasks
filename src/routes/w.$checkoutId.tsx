@@ -93,8 +93,10 @@ function WorkspaceBoardPage() {
   // object (recreated every render — depending on it would reset debounces
   // on every keystroke reflect and poll tick).
   const boardRef = useRef(board);
+  const searchTaskRef = useRef(search.task);
   useEffect(() => {
     boardRef.current = board;
+    searchTaskRef.current = search.task;
   });
   /** Prune expired claims and answer whether a path is spoken for. */
   const isTaken = useCallback((path: string): boolean => {
@@ -345,11 +347,12 @@ function WorkspaceBoardPage() {
       const refocus = caret >= 0 && caret <= headlineEnd;
       void current
         .renameTask(draftPath, target, source, (final) => final, () => {
-          // Cleanup ran (sheet closed or a newer title owns the draft):
-          // keep state consistent but never navigate a closed sheet open.
           renamedDraftRef.current = refocus;
           setDraftPath((currentDraft) => (currentDraft === draftPath ? target : currentDraft));
-          if (!cancelled) patchSearch({ task: target });
+          // Navigate by CURRENT truth: if the sheet still shows the source
+          // (even under a newer title effect), it must follow the moved file
+          // — but a closed sheet stays closed.
+          if (searchTaskRef.current === draftPath) patchSearch({ task: target });
         })
         .then((error) => {
           // A failed rename left the draft in place — keep trailing the

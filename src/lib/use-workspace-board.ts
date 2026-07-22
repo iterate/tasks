@@ -287,7 +287,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   const reflectLiveContent = useCallback((path: string, content: string) => {
     pathEpochs.current.set(path, (pathEpochs.current.get(path) ?? 0) + 1);
     setFiles((current) => {
-      if (current === null || current[path] === content) return current;
+      // Reflect only onto paths the mirror still holds — an unmount flush
+      // arriving after a rename/delete must not resurrect a phantom card.
+      if (current === null || current[path] === undefined || current[path] === content)
+        return current;
       // A live edit IS dirtiness: commit controls must arm on the first
       // keystroke, not on the next status poll.
       setChanges((changes) =>
