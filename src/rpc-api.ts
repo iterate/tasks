@@ -450,9 +450,22 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
   async files(): Promise<Record<string, string>> {
     return this.#withWorkspace(async (ws) => {
       const paths = await ws.glob("**/tasks/**/*.md");
-      // ONE batched platform call for the whole set — per-file reads through
-      // this chain collapse at thousands of tasks.
-      const contents = await ws.readFiles(paths);
+      // Batched platform calls for the whole set — per-file reads through
+      // this chain collapse at thousands of tasks. The platform caps one
+      // readFiles call at 10,000 paths, so boards beyond that read in
+      // chunks; two lanes keep the pipe full without stampeding the DO.
+      const CHUNK = 5_000;
+      const chunks: string[][] = [];
+      for (let index = 0; index < paths.length; index += CHUNK) {
+        chunks.push(paths.slice(index, index + CHUNK));
+      }
+      const contents: Record<string, string | null> = {};
+      for (let index = 0; index < chunks.length; index += 2) {
+        const pair = await Promise.all(
+          chunks.slice(index, index + 2).map((chunk) => ws.readFiles(chunk)),
+        );
+        for (const part of pair) Object.assign(contents, part);
+      }
       // Keys leave here repo-relative (no leading slash) — one shape for
       // every consumer; reads/writes prepend the platform slash themselves.
       // Null reads (vanished between glob and read, transient failure) are
