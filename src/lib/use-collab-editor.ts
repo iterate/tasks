@@ -79,7 +79,7 @@ export function useCollabEditor(input: {
 
     // Redlines are the attribution layer only: added-text highlights,
     // deletion markers, who/when tooltips. No merge chunks, no accept/reject.
-    const redlineExtensions = async (): Promise<Extension> => redlineExtension(connection);
+    const redlines = (on: boolean): Extension => (on ? redlineExtension(connection) : []);
 
     let reflectTimer: ReturnType<typeof setTimeout> | null = null;
     const liveReflector =
@@ -107,17 +107,14 @@ export function useCollabEditor(input: {
       });
 
     toggleRef.current = (on: boolean) => {
-      void (async () => {
-        const layers = on ? await redlineExtensions() : [];
-        if (!cancelled) view?.dispatch({ effects: redlineLayer.reconfigure(layers) });
-      })();
+      view?.dispatch({ effects: redlineLayer.reconfigure(redlines(on)) });
     };
 
     connection.onReseed = (snapshot, unsynced) => {
       if (cancelled || view === null) return;
       connection.reseed(snapshot);
-      view.setState(buildState(snapshot.content, snapshot.version, []));
-      toggleRef.current?.(redlineRef.current);
+      // Layers ride the rebuilt state atomically — no undecorated frame.
+      view.setState(buildState(snapshot.content, snapshot.version, redlines(redlineRef.current)));
       // Unacked local edits cannot be positionally rebased without the
       // server history that is gone — surface them, never guess a merge.
       setRecovery(unsynced);
@@ -126,13 +123,11 @@ export function useCollabEditor(input: {
 
     void ensureCollabIdentity()
       .then(() => connection.open())
-      .then(async (opened) => {
-        if (cancelled || host.current === null) return;
-        const layers = redlineRef.current ? await redlineExtensions() : [];
+      .then((opened) => {
         if (cancelled || host.current === null) return;
         view = new EditorView({
           parent: host.current,
-          state: buildState(opened.content, opened.version, layers),
+          state: buildState(opened.content, opened.version, redlines(redlineRef.current)),
         });
         if (apiRef !== undefined) {
           const live = view;

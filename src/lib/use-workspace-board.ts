@@ -85,6 +85,12 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   // badges on the same tick; poll errors surface instead of vanishing.
   const versionsRef = useRef<Record<string, number>>({});
   const tickRef = useRef(0);
+  // The tick reads changes through a ref: depending on the map would tear
+  // the interval down on every badge change and reset the status cadence.
+  const changesRef = useRef(changes);
+  useEffect(() => {
+    changesRef.current = changes;
+  });
   // Bumped by EVERY local mutation (writes, deletes, live keystrokes,
   // reverts, commits): an in-flight poll response from before the mutation
   // must not overwrite newer local state — badges OR file content. The next
@@ -105,6 +111,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       ])
         .then(async ([rawVersions, status]) => {
           if (generation.current !== mine) return;
+          const changes = changesRef.current;
           const next = status === null ? changes : changeMap(status);
           const versions = Object.fromEntries(
             Object.entries(rawVersions).map(([path, version]) => [boardKey(path), version]),
@@ -149,7 +156,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         );
     }, POLL_MS);
     return () => clearInterval(timer);
-  }, [lane, changes]);
+  }, [lane]);
 
   // Per-file parse cache: a poll refetch or one live keystroke must cost
   // O(changed files), never a reparse of the whole board.
@@ -175,6 +182,31 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     return next.sort((left, right) => left.path.localeCompare(right.path));
   }, [files]);
 
+  /** Roll one path's optimistic files+changes state back to what a failed
+   * RPC left behind on the server (shared by write and delete). */
+  const restoreOnFailure = useCallback(
+    (path: string, priorContent: string | undefined, priorChange: TaskChangeStatus | undefined) =>
+      (cause: unknown) => {
+        mutationEpoch.current++;
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setFiles((current) => {
+          if (current === null) return current;
+          if (priorContent === undefined) {
+            const { [path]: _gone, ...rest } = current;
+            return rest;
+          }
+          return { ...current, [path]: priorContent };
+        });
+        setChanges((current) => {
+          const next = new Map(current);
+          if (priorChange === undefined) next.delete(path);
+          else next.set(path, priorChange);
+          return next;
+        });
+      },
+    [],
+  );
+
   /** Optimistic local write + the same platform write an agent would make;
    * an RPC failure restores the prior card and badge (no phantom adds or
    * stale edits waiting on a poll to reconcile). */
@@ -197,26 +229,11 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         });
         return current === null ? current : { ...current, [path]: content };
       });
-      void lane((ws) => ws.write(`/${path}`, content)).catch((cause: unknown) => {
-        mutationEpoch.current++;
-        setError(cause instanceof Error ? cause.message : String(cause));
-        setFiles((current) => {
-          if (current === null) return current;
-          if (priorContent === undefined) {
-            const { [path]: _gone, ...rest } = current;
-            return rest;
-          }
-          return { ...current, [path]: priorContent };
-        });
-        setChanges((current) => {
-          const next = new Map(current);
-          if (priorChange === undefined) next.delete(path);
-          else next.set(path, priorChange);
-          return next;
-        });
-      });
+      void lane((ws) => ws.write(`/${path}`, content)).catch((cause: unknown) =>
+        restoreOnFailure(path, priorContent, priorChange)(cause),
+      );
     },
-    [lane],
+    [lane, restoreOnFailure],
   );
 
   const deleteTask = useCallback(
@@ -240,25 +257,13 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         else next.set(path, transitioned);
         return next;
       });
-      void lane((ws) => ws.delete(`/${path}`)).catch((cause: unknown) => {
-        // The workspace still has the file — put the card (and its badge)
-        // back instead of pretending the delete happened.
-        mutationEpoch.current++;
-        setError(cause instanceof Error ? cause.message : String(cause));
-        setFiles((current) =>
-          current === null || priorContent === undefined
-            ? current
-            : { ...current, [path]: priorContent },
-        );
-        setChanges((current) => {
-          const next = new Map(current);
-          if (priorChange === undefined) next.delete(path);
-          else next.set(path, priorChange);
-          return next;
-        });
-      });
+      // The workspace still has the file on failure — put the card (and its
+      // badge) back instead of pretending the delete happened.
+      void lane((ws) => ws.delete(`/${path}`)).catch((cause: unknown) =>
+        restoreOnFailure(path, priorContent, priorChange)(cause),
+      );
     },
-    [lane],
+    [lane, restoreOnFailure],
   );
 
   /** Live content from an open editor session — keeps the card current

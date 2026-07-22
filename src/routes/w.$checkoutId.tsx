@@ -94,18 +94,24 @@ function WorkspaceBoardPage() {
   useEffect(() => {
     boardRef.current = board;
   });
-  const claimPath = useCallback((desired: string): string => {
+  /** Prune expired claims and answer whether a path is spoken for. */
+  const isTaken = useCallback((path: string): boolean => {
     const now = Date.now();
-    for (const [path, at] of claimedRef.current) {
-      if (now - at > 5_000) claimedRef.current.delete(path);
+    for (const [claimed, at] of claimedRef.current) {
+      if (now - at > 5_000) claimedRef.current.delete(claimed);
     }
-    const target = unclaimedPath(
-      desired,
-      (path) => boardRef.current.files?.[path] !== undefined || claimedRef.current.has(path),
-    );
-    claimedRef.current.set(target, now);
-    return target;
+    return boardRef.current.files?.[path] !== undefined || claimedRef.current.has(path);
   }, []);
+
+  const claimPath = useCallback(
+    (desired: string): string => {
+      const target = unclaimedPath(desired, isTaken);
+      claimedRef.current.set(target, Date.now());
+      return target;
+    },
+    [isTaken],
+  );
+
 
   /** Live text of the open file, else the board's copy. */
   const sourceOf = useCallback((task: BoardTask): string => {
@@ -124,6 +130,15 @@ function WorkspaceBoardPage() {
       return true;
     },
     [board],
+  );
+
+  /** The live-doc rule, structurally: transform the OPEN file in its editor,
+   * else write the transformed board copy. */
+  const mutateTask = useCallback(
+    (task: BoardTask, transform: (source: string) => string) => {
+      if (!applyLive(task.path, transform)) board.writeTask(task.path, transform(sourceOf(task)));
+    },
+    [applyLive, board, sourceOf],
   );
   const [commitPending, setCommitPending] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
@@ -192,7 +207,7 @@ function WorkspaceBoardPage() {
         return next;
       };
       if (folder === task.folder) {
-        if (!applyLive(task.path, transform)) board.writeTask(task.path, transform(sourceOf(task)));
+        mutateTask(task, transform);
         return;
       }
       // ONE rename at a time (same lock as the path input and the draft
@@ -215,7 +230,7 @@ function WorkspaceBoardPage() {
           renamingRef.current = false;
         });
     },
-    [applyLive, board, claimPath, patchSearch, search.task, sourceOf],
+    [board, claimPath, mutateTask, patchSearch, search.task, sourceOf],
   );
 
   const addTask = useCallback(
@@ -223,21 +238,15 @@ function WorkspaceBoardPage() {
       // Rapid adds must not collapse: number the TITLE (New task 2, …) so
       // the path, the heading, and the later title-trailing rename all
       // stay distinct.
-      const now = Date.now();
-      for (const [path, at] of claimedRef.current) {
-        if (now - at > 5_000) claimedRef.current.delete(path);
-      }
-      const taken = (path: string) =>
-        board.files?.[path] !== undefined || claimedRef.current.has(path);
       let title = "New task";
       let file = newTaskFile({ state, title });
       let target = taskPathInFolder(file.path, folder ?? "tasks");
-      for (let suffix = 2; taken(target); suffix++) {
+      for (let suffix = 2; isTaken(target); suffix++) {
         title = `New task ${suffix}`;
         file = newTaskFile({ state, title });
         target = taskPathInFolder(file.path, folder ?? "tasks");
       }
-      claimedRef.current.set(target, now);
+      claimedRef.current.set(target, Date.now());
       // Adding from a tag row: the task wears that tag from birth.
       const content = label === undefined ? file.content : setTaskCardLabels(file.content, [label]);
       board.writeTask(target, content);
@@ -245,7 +254,7 @@ function WorkspaceBoardPage() {
       setDraftPath(target);
       patchSearch({ task: target });
     },
-    [board, patchSearch],
+    [board, isTaken, patchSearch],
   );
 
   // While the draft's sheet is open and it is still an uncommitted add, its
@@ -421,14 +430,11 @@ function WorkspaceBoardPage() {
         changeStatus={openTask === null ? undefined : board.changes.get(openTask.path)}
         onLiveContent={board.reflectLiveContent}
         onChangeState={(state) => {
-          if (openTask === null) return;
-          if (!applyLive(openTask.path, (current) => setTaskCardState(current, state)))
-            board.writeTask(openTask.path, setTaskCardState(sourceOf(openTask), state));
+          if (openTask !== null) mutateTask(openTask, (current) => setTaskCardState(current, state));
         }}
         onChangeLabels={(labels) => {
-          if (openTask === null) return;
-          if (!applyLive(openTask.path, (current) => setTaskCardLabels(current, labels)))
-            board.writeTask(openTask.path, setTaskCardLabels(sourceOf(openTask), labels));
+          if (openTask !== null)
+            mutateTask(openTask, (current) => setTaskCardLabels(current, labels));
         }}
         onRename={(nextPath) =>
           openTask === null ? Promise.resolve(null) : renameTask(openTask, nextPath)
