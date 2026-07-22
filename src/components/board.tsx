@@ -329,9 +329,9 @@ function BoardCard({
           {task.summary}
         </p>
       )}
-      {(showTags && task.labels.length > 0) || (showFolder && task.folder !== "/") ? (
+      {(showTags && task.labels.length > 0) || (showFolder && task.folder !== "tasks") ? (
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
-          {showFolder && task.folder !== "/" ? (
+          {showFolder && task.folder !== "tasks" ? (
             <Badge variant="outline" className="gap-1 font-mono">
               <FolderIcon aria-hidden className="size-3" />
               {task.folder}

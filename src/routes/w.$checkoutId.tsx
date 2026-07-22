@@ -195,13 +195,13 @@ function WorkspaceBoardPage() {
       // Never collapse onto an existing file in the target folder — suffix.
       const nextPath = claimPath(taskPathInFolder(task.path, folder));
       const wasOpen = search.task === task.path;
-      if (wasOpen) patchSearch({ task: nextPath });
-      void board
-        .renameTask(task.path, nextPath, transform(sourceOf(task)), transform)
-        .then((ok) => {
-          // A failed create rolled the board back — put the sheet back too.
-          if (!ok && wasOpen) patchSearch({ task: task.path });
-        });
+      // Navigate only once the write LANDED: the sheet must never open a
+      // path that doesn't exist yet (racing the create), and the old editor
+      // keeps the user's text until then. The final-frame carry runs after
+      // the navigation unmounts it.
+      void board.renameTask(task.path, nextPath, transform(sourceOf(task)), transform, () => {
+        if (wasOpen) patchSearch({ task: nextPath });
+      });
     },
     [applyLive, board, claimPath, patchSearch, search.task, sourceOf],
   );
@@ -263,15 +263,12 @@ function WorkspaceBoardPage() {
       // A sibling with this title already exists: suffix instead of bailing
       // (the filename must keep trailing the title) — and never collapse.
       const target = claimPath(desired);
-      renamedDraftRef.current = true;
-      setDraftPath(target);
-      patchSearch({ task: target });
-      void current.renameTask(draftPath, target, source).then((ok) => {
-        if (ok) return;
-        // The write failed and the board rolled back — follow it.
-        renamedDraftRef.current = false;
-        setDraftPath(draftPath);
-        patchSearch({ task: draftPath });
+      // Navigation waits for the write to land (never open a not-yet-created
+      // path); on failure nothing moved, so nothing to roll back.
+      void current.renameTask(draftPath, target, source, (final) => final, () => {
+        renamedDraftRef.current = true;
+        setDraftPath(target);
+        patchSearch({ task: target });
       });
     }, 700);
     return () => clearTimeout(timer);
@@ -288,12 +285,9 @@ function WorkspaceBoardPage() {
       if (nextPath === task.path) return null;
       if (board.files?.[nextPath] !== undefined) return "A file already exists at that path.";
       const wasOpen = search.task === task.path;
-      setDraftPath((current) => (current === task.path ? nextPath : current));
-      if (wasOpen) patchSearch({ task: nextPath });
-      void board.renameTask(task.path, nextPath, sourceOf(task)).then((ok) => {
-        if (ok) return;
-        setDraftPath((current) => (current === nextPath ? task.path : current));
-        if (wasOpen) patchSearch({ task: task.path });
+      void board.renameTask(task.path, nextPath, sourceOf(task), (final) => final, () => {
+        setDraftPath((current) => (current === task.path ? nextPath : current));
+        if (wasOpen) patchSearch({ task: nextPath });
       });
       return null;
     },

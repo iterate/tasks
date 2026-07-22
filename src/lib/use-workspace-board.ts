@@ -255,6 +255,8 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       toPath: string,
       content: string,
       carry: (finalSource: string) => string = (source) => source,
+      /** Runs once the write RPC landed — the moment navigation is safe. */
+      onWritten?: () => void,
     ): Promise<boolean> => {
       mutationEpoch.current++;
       let fromContent: string | undefined;
@@ -293,6 +295,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         setError(cause instanceof Error ? cause.message : String(cause));
         return false;
       }
+      onWritten?.();
       try {
         const final = await lane((ws) => ws.read(`/${fromPath}`));
         if (final !== null) {
