@@ -131,3 +131,17 @@ export function changeAfterDelete(
 ): TaskChangeStatus | null {
   return current === "added" ? null : "deleted";
 }
+
+/** First free path for a desired task file: the path itself, else the
+ * filename suffixed -2, -3, … — two tasks must never collapse onto one
+ * file through adds, drags, or renames. */
+export function unclaimedPath(desired: string, taken: (path: string) => boolean): string {
+  if (!taken(desired)) return desired;
+  const segments = desired.split("/");
+  const filename = segments.pop() ?? desired;
+  const stem = filename.replace(/\.md$/i, "");
+  for (let suffix = 2; ; suffix++) {
+    const candidate = [...segments, `${stem}-${suffix}.md`].join("/");
+    if (!taken(candidate)) return candidate;
+  }
+}

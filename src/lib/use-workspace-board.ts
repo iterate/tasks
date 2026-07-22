@@ -238,6 +238,77 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     [lane],
   );
 
+  /**
+   * Rename = optimistic swap, but the DELETE waits for the write to land:
+   * a failed create must roll the board back, never drop the source file.
+   * `carry` folds a final-frame keystroke (still on the dying session) onto
+   * the new path before the delete discards that session.
+   */
+  const renameTask = useCallback(
+    async (
+      fromPath: string,
+      toPath: string,
+      content: string,
+      carry: (finalSource: string) => string = (source) => source,
+    ): Promise<boolean> => {
+      mutationEpoch.current++;
+      let fromContent: string | undefined;
+      let fromChange: TaskChangeStatus | undefined;
+      setChanges((current) => {
+        fromChange = current.get(fromPath);
+        const next = new Map(current);
+        next.set(toPath, changeAfterWrite(current.get(toPath), false));
+        const transitioned = changeAfterDelete(current.get(fromPath));
+        if (transitioned === null) next.delete(fromPath);
+        else next.set(fromPath, transitioned);
+        return next;
+      });
+      setFiles((current) => {
+        if (current === null) return current;
+        fromContent = current[fromPath];
+        const { [fromPath]: _gone, ...rest } = current;
+        return { ...rest, [toPath]: content };
+      });
+      try {
+        await lane((ws) => ws.write(`/${toPath}`, content));
+      } catch (cause) {
+        mutationEpoch.current++;
+        setFiles((current) => {
+          if (current === null) return current;
+          const { [toPath]: _added, ...rest } = current;
+          return fromContent === undefined ? rest : { ...rest, [fromPath]: fromContent };
+        });
+        setChanges((current) => {
+          const next = new Map(current);
+          next.delete(toPath);
+          if (fromChange === undefined) next.delete(fromPath);
+          else next.set(fromPath, fromChange);
+          return next;
+        });
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return false;
+      }
+      try {
+        const final = await lane((ws) => ws.read(`/${fromPath}`));
+        if (final !== null) {
+          const carried = carry(final);
+          if (carried !== content) {
+            await lane((ws) => ws.write(`/${toPath}`, carried));
+            mutationEpoch.current++;
+            setFiles((current) =>
+              current === null ? current : { ...current, [toPath]: carried },
+            );
+          }
+        }
+      } catch {
+        // The carry is best-effort; the source still gets deleted below.
+      }
+      void lane((ws) => ws.delete(`/${fromPath}`)).catch(() => {});
+      return true;
+    },
+    [lane],
+  );
+
   /** Change summaries in the shape the commit controls speak. */
   const taskChanges = useMemo<TaskChangeSummary[]>(
     () =>
@@ -322,6 +393,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     ready: files !== null,
     readTask,
     reflectLiveContent,
+    renameTask,
     revertTask,
     taskChanges,
     tasks,

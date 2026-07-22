@@ -19,7 +19,7 @@ import { WorkspaceTaskSheet } from "../components/workspace-task-sheet.tsx";
 import { useWorkspaceBoard } from "../lib/use-workspace-board.ts";
 import { useTaskCommit } from "../lib/use-task-commit.ts";
 import { projectBoard } from "../lib/board-engine.ts";
-import { taskPathInFolder, type BoardTask, type RowField } from "../lib/board-model.ts";
+import { taskPathInFolder, unclaimedPath, type BoardTask, type RowField } from "../lib/board-model.ts";
 import { DEFAULT_REPO_PATH, normalizeRepoPath } from "../lib/checkout-shared.ts";
 import {
   columnsForTasks,
@@ -65,6 +65,9 @@ function WorkspaceBoardPage() {
   // minute by minute. Committing is an explicit act here.
   const [autoCommit, setAutoCommit] = useState(false);
   const [eventsOpen, setEventsOpen] = useState(false);
+  // Bumped on revert: the platform ends the file's session, so the open
+  // editor must remount and reseed from the reverted content.
+  const [editorEpoch, setEditorEpoch] = useState(0);
   // A just-created task: the editor opens with the headline selected and the
   // filename trails the title until the first commit (same UX as the Yjs
   // board).
@@ -74,6 +77,21 @@ function WorkspaceBoardPage() {
   // live document (the board mirror is 200ms behind it — writing board state
   // over a live path would drop the newest keystrokes).
   const editorApiRef = useRef<CollabEditorApi | null>(null);
+  // Paths claimed by mutations THIS RENDER: board.files is async React
+  // state, so two rapid adds/moves in one frame would both see it stale and
+  // collapse onto one filename without this synchronous guard.
+  const claimedRef = useRef(new Set<string>());
+  const claimPath = useCallback(
+    (desired: string): string => {
+      const target = unclaimedPath(
+        desired,
+        (path) => board.files?.[path] !== undefined || claimedRef.current.has(path),
+      );
+      claimedRef.current.add(target);
+      return target;
+    },
+    [board.files],
+  );
 
   /** Live text of the open file, else the board's copy. */
   const sourceOf = useCallback((task: BoardTask): string => {
@@ -163,31 +181,36 @@ function WorkspaceBoardPage() {
         if (!applyLive(task.path, transform)) board.writeTask(task.path, transform(sourceOf(task)));
         return;
       }
-      const nextPath = taskPathInFolder(task.path, folder);
-      const source = transform(sourceOf(task));
-      board.writeTask(nextPath, source);
-      if (search.task === task.path) {
-        patchSearch({ task: nextPath });
-        // The open editor's final frame may still reach the old session —
-        // carry any divergence over before the delete discards it.
-        void board.readTask(task.path).then(
-          (final) => {
-            if (final !== null && transform(final) !== source) board.writeTask(nextPath, transform(final));
-            board.deleteTask(task.path);
-          },
-          () => board.deleteTask(task.path),
-        );
-      } else {
-        board.deleteTask(task.path);
-      }
+      // Never collapse onto an existing file in the target folder — suffix.
+      const nextPath = claimPath(taskPathInFolder(task.path, folder));
+      const wasOpen = search.task === task.path;
+      if (wasOpen) patchSearch({ task: nextPath });
+      void board
+        .renameTask(task.path, nextPath, transform(sourceOf(task)), transform)
+        .then((ok) => {
+          // A failed create rolled the board back — put the sheet back too.
+          if (!ok && wasOpen) patchSearch({ task: task.path });
+        });
     },
-    [applyLive, board, patchSearch, search.task, sourceOf],
+    [applyLive, board, claimPath, patchSearch, search.task, sourceOf],
   );
 
   const addTask = useCallback(
     (state: string, folder: string | null) => {
-      const file = newTaskFile({ state, title: "New task" });
-      const target = taskPathInFolder(file.path, folder ?? "/");
+      // Rapid adds must not collapse: number the TITLE (New task 2, …) so
+      // the path, the heading, and the later title-trailing rename all
+      // stay distinct.
+      const taken = (path: string) =>
+        board.files?.[path] !== undefined || claimedRef.current.has(path);
+      let title = "New task";
+      let file = newTaskFile({ state, title });
+      let target = taskPathInFolder(file.path, folder ?? "/");
+      for (let suffix = 2; taken(target); suffix++) {
+        title = `New task ${suffix}`;
+        file = newTaskFile({ state, title });
+        target = taskPathInFolder(file.path, folder ?? "/");
+      }
+      claimedRef.current.add(target);
       board.writeTask(target, file.content);
       renamedDraftRef.current = false;
       setDraftPath(target);
@@ -204,30 +227,28 @@ function WorkspaceBoardPage() {
     if (board.changes.get(draftPath) !== "added") return;
     const task = board.tasks.find((candidate) => candidate.path === draftPath);
     if (task === undefined) return;
-    const target = taskPathInFolder(taskPathForTitle(task.title), task.folder);
-    if (target === draftPath || board.files?.[target] !== undefined) return;
+    const desired = taskPathInFolder(taskPathForTitle(task.title), task.folder);
+    if (desired === draftPath) return;
     const timer = setTimeout(() => {
       // The LIVE doc, not the board mirror — the mirror is debounced and a
       // rename must never persist a version missing the newest keystrokes.
       const source = sourceOf(task);
-      if (board.files?.[target] !== undefined) return;
-      board.writeTask(target, source);
+      // A sibling with this title already exists: suffix instead of bailing
+      // (the filename must keep trailing the title) — and never collapse.
+      const target = claimPath(desired);
       renamedDraftRef.current = true;
       setDraftPath(target);
       patchSearch({ task: target });
-      // The old editor unmounts with the navigation; a keystroke landing in
-      // its final frame lives in the old session's head — carry it over
-      // before the delete discards that session.
-      void board.readTask(draftPath).then(
-        (final) => {
-          if (final !== null && final !== source) board.writeTask(target, final);
-          board.deleteTask(draftPath);
-        },
-        () => board.deleteTask(draftPath),
-      );
+      void board.renameTask(draftPath, target, source).then((ok) => {
+        if (ok) return;
+        // The write failed and the board rolled back — follow it.
+        renamedDraftRef.current = false;
+        setDraftPath(draftPath);
+        patchSearch({ task: draftPath });
+      });
     }, 700);
     return () => clearTimeout(timer);
-  }, [draftPath, search.task, board, patchSearch, sourceOf]);
+  }, [draftPath, search.task, board, claimPath, patchSearch, sourceOf]);
 
   // The sheet's path field: any rename the board can represent is allowed —
   // the file must stay a task (.md under a folder named "tasks").
@@ -239,18 +260,14 @@ function WorkspaceBoardPage() {
         return 'Path must be a .md file inside a folder named "tasks".';
       if (nextPath === task.path) return null;
       if (board.files?.[nextPath] !== undefined) return "A file already exists at that path.";
-      const source = sourceOf(task);
-      board.writeTask(nextPath, source);
+      const wasOpen = search.task === task.path;
       setDraftPath((current) => (current === task.path ? nextPath : current));
-      if (search.task === task.path) patchSearch({ task: nextPath });
-      // Same final-frame carry as the draft rename (see that effect).
-      void board.readTask(task.path).then(
-        (final) => {
-          if (final !== null && final !== source) board.writeTask(nextPath, final);
-          board.deleteTask(task.path);
-        },
-        () => board.deleteTask(task.path),
-      );
+      if (wasOpen) patchSearch({ task: nextPath });
+      void board.renameTask(task.path, nextPath, sourceOf(task)).then((ok) => {
+        if (ok) return;
+        setDraftPath((current) => (current === nextPath ? task.path : current));
+        if (wasOpen) patchSearch({ task: task.path });
+      });
       return null;
     },
     [board, patchSearch, search.task, sourceOf],
@@ -360,6 +377,7 @@ function WorkspaceBoardPage() {
             board.writeTask(openTask.path, setTaskCardLabels(sourceOf(openTask), labels));
         }}
         onRename={(nextPath) => (openTask === null ? null : renameTask(openTask, nextPath))}
+        editorEpoch={editorEpoch}
         editorApiRef={editorApiRef}
         focusHeadline={
           openTask !== null && openTask.path === draftPath
@@ -369,7 +387,9 @@ function WorkspaceBoardPage() {
             : undefined
         }
         onRevert={() => {
-          if (openTask !== null) board.revertTask(openTask.path);
+          if (openTask === null) return;
+          board.revertTask(openTask.path);
+          setEditorEpoch((current) => current + 1);
         }}
         onDelete={() => {
           if (openTask !== null) {

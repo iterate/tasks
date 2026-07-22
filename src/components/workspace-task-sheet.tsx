@@ -47,6 +47,7 @@ export function WorkspaceTaskSheet({
   changeStatus,
   onRename,
   focusHeadline,
+  editorEpoch,
   editorApiRef,
   onLiveContent,
   onChangeState,
@@ -64,6 +65,9 @@ export function WorkspaceTaskSheet({
   /** Rename the task file; returns an error message or null on success. */
   onRename: (nextPath: string) => string | null;
   focusHeadline?: "select" | "end";
+  /** Bumped when the session was ended server-side (revert) — remounts the
+   * editor so it reseeds instead of showing the dead session's text. */
+  editorEpoch?: number;
   editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
@@ -89,6 +93,7 @@ export function WorkspaceTaskSheet({
             changeStatus={changeStatus}
             onRename={onRename}
             focusHeadline={focusHeadline}
+            editorEpoch={editorEpoch}
             editorApiRef={editorApiRef}
             onLiveContent={onLiveContent}
             onChangeState={onChangeState}
@@ -111,6 +116,7 @@ function SheetBody({
   changeStatus,
   onRename,
   focusHeadline,
+  editorEpoch,
   editorApiRef,
   onLiveContent,
   onChangeState,
@@ -127,6 +133,9 @@ function SheetBody({
   /** Rename the task file; returns an error message or null on success. */
   onRename: (nextPath: string) => string | null;
   focusHeadline?: "select" | "end";
+  /** Bumped when the session was ended server-side (revert) — remounts the
+   * editor so it reseeds instead of showing the dead session's text. */
+  editorEpoch?: number;
   editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
@@ -260,6 +269,7 @@ function SheetBody({
         fallback={<p className="p-4 text-sm text-muted-foreground">Loading editor…</p>}
       >
         <WorkspaceTaskEditor
+          key={editorEpoch ?? 0}
           checkoutId={checkoutId}
           repoPath={repoPath}
           path={task.path}

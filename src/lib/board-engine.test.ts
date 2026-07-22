@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { changeAfterDelete, changeAfterWrite, toBoardTask } from "./board-model.ts";
+import { changeAfterDelete, changeAfterWrite, toBoardTask, unclaimedPath } from "./board-model.ts";
 import { matchesFilter, projectBoard } from "./board-engine.ts";
 import { setTaskCardLabels } from "../tasks-model.ts";
 
@@ -107,6 +107,22 @@ describe("optimistic change transitions", () => {
     expect(changeAfterDelete("added")).toBeNull();
     expect(changeAfterDelete("modified")).toBe("deleted");
     expect(changeAfterDelete(undefined)).toBe("deleted");
+  });
+});
+
+describe("unclaimedPath", () => {
+  it("returns the desired path when free", () => {
+    expect(unclaimedPath("tasks/new-task.md", () => false)).toBe("tasks/new-task.md");
+  });
+  it("suffixes the filename until free — tasks never collapse onto one file", () => {
+    const taken = new Set(["tasks/new-task.md", "tasks/new-task-2.md"]);
+    expect(unclaimedPath("tasks/new-task.md", (path) => taken.has(path))).toBe(
+      "tasks/new-task-3.md",
+    );
+  });
+  it("keeps the folder prefix intact", () => {
+    const taken = new Set(["sub/tasks/x.md"]);
+    expect(unclaimedPath("sub/tasks/x.md", (path) => taken.has(path))).toBe("sub/tasks/x-2.md");
   });
 });
 
