@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
@@ -66,6 +66,13 @@ import { Skeleton } from "../ui/skeleton.tsx";
 type CheckoutSearch = { repoPath?: string; task?: string; q?: string; group?: "none" | "tags" };
 
 export const Route = createFileRoute("/c/$checkoutId")({
+  beforeLoad: ({ params, search }) => {
+    // The workspace board (/w) is the product; the Yjs lane stays reachable
+    // only with ?legacy=1 for comparison until it is deleted.
+    if ((search as { legacy?: string }).legacy !== "1") {
+      throw redirect({ params, search, to: "/w/$checkoutId" });
+    }
+  },
   validateSearch: (search: Record<string, unknown>): CheckoutSearch => {
     const repoPath = normalizeRepoPath(
       typeof search.repoPath === "string" ? search.repoPath : null,
