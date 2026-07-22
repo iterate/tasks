@@ -156,6 +156,7 @@ export function useCollabEditor(input: {
               });
             },
             path,
+            selectionHead: () => live.state.selection.main.head,
             source: () => live.state.doc.toString(),
           };
         }
@@ -179,7 +180,14 @@ export function useCollabEditor(input: {
       );
     return () => {
       cancelled = true;
-      if (reflectTimer) clearTimeout(reflectTimer);
+      if (reflectTimer) {
+        clearTimeout(reflectTimer);
+        // Flush, don't drop: the final keystrokes must reach the board even
+        // though the debounce hadn't fired.
+        if (view !== null && onLiveContent !== undefined) {
+          onLiveContent(path, view.state.doc.toString());
+        }
+      }
       toggleRef.current = null;
       if (apiRef !== undefined) apiRef.current = null;
       view?.destroy();

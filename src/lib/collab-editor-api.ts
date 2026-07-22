@@ -12,6 +12,8 @@ export interface CollabEditorApi {
   path: string;
   /** The live document text, synchronously. */
   source(): string;
+  /** The caret position (doc offset), synchronously. */
+  selectionHead(): number;
   /** Apply `transform` to the live doc as a minimal splice (concurrent
    * edits outside the changed region survive; the redline stays truthful). */
   applyTransform(transform: (source: string) => string): void;

@@ -125,6 +125,11 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
           for (const [path, version] of Object.entries(versions)) {
             if (versionsRef.current[path] !== version) moved.add(path);
           }
+          // A path that VANISHED from the version map was removed remotely
+          // (deleted, or committed away) — refetch clears the phantom card.
+          for (const path of Object.keys(versionsRef.current)) {
+            if (!(path in versions)) moved.add(path);
+          }
           if (status !== null) {
             for (const [path, kind] of next) if (changes.get(path) !== kind) moved.add(path);
             for (const path of changes.keys()) if (!next.has(path)) moved.add(path);

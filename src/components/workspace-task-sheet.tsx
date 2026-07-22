@@ -55,6 +55,7 @@ export function WorkspaceTaskSheet({
   focusHeadline,
   editorEpoch,
   redline,
+  liveSource,
   editorApiRef,
   onLiveContent,
   onChangeState,
@@ -77,6 +78,8 @@ export function WorkspaceTaskSheet({
   editorEpoch?: number;
   /** Track changes: the redline layer on the editor (board setting). */
   redline?: boolean;
+  /** Live document text when a session is open (Preview must not lag). */
+  liveSource?: () => string | null;
   editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
@@ -104,6 +107,7 @@ export function WorkspaceTaskSheet({
             focusHeadline={focusHeadline}
             editorEpoch={editorEpoch}
             redline={redline}
+            liveSource={liveSource}
             editorApiRef={editorApiRef}
             onLiveContent={onLiveContent}
             onChangeState={onChangeState}
@@ -128,6 +132,7 @@ function SheetBody({
   focusHeadline,
   editorEpoch,
   redline,
+  liveSource,
   editorApiRef,
   onLiveContent,
   onChangeState,
@@ -149,6 +154,8 @@ function SheetBody({
   editorEpoch?: number;
   /** Track changes: the redline layer on the editor (board setting). */
   redline?: boolean;
+  /** Live document text when a session is open (Preview must not lag). */
+  liveSource?: () => string | null;
   editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
@@ -288,7 +295,7 @@ function SheetBody({
         </div>
         <TabsContent value="preview" className="flex min-h-0 flex-1 flex-col">
           <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Rendering…</p>}>
-            <WorkspaceTaskPreview source={task.source} />
+            <WorkspaceTaskPreview source={liveSource?.() ?? task.source} />
           </Suspense>
         </TabsContent>
         <TabsContent value="editor" keepMounted className="flex min-h-0 flex-1 flex-col data-[hidden]:hidden">

@@ -333,11 +333,23 @@ function WorkspaceBoardPage() {
       // Navigation waits for the write to land (never open a not-yet-created
       // path); on failure nothing moved, so nothing to roll back.
       renamingRef.current = true;
+      // Only steal focus back to the headline if the caret was still IN the
+      // headline when the rename fired — body typing keeps its flow.
+      const headlineEnd = (() => {
+        const heading = /^#\s+.*$/m.exec(source);
+        return heading === null ? -1 : heading.index + heading[0].length;
+      })();
+      const caret = editorApiRef.current?.path === draftPath
+        ? editorApiRef.current.selectionHead()
+        : -1;
+      const refocus = caret >= 0 && caret <= headlineEnd;
       void current
         .renameTask(draftPath, target, source, (final) => final, () => {
-          renamedDraftRef.current = true;
-          setDraftPath(target);
-          patchSearch({ task: target });
+          // Cleanup ran (sheet closed or a newer title owns the draft):
+          // keep state consistent but never navigate a closed sheet open.
+          renamedDraftRef.current = refocus;
+          setDraftPath((currentDraft) => (currentDraft === draftPath ? target : currentDraft));
+          if (!cancelled) patchSearch({ task: target });
         })
         .then((error) => {
           // A failed rename left the draft in place — keep trailing the
@@ -502,6 +514,11 @@ function WorkspaceBoardPage() {
             ? renamedDraftRef.current
               ? "end"
               : "select"
+            : undefined
+        }
+        liveSource={
+          editorApiRef.current?.path === openTask?.path
+            ? () => editorApiRef.current?.source() ?? null
             : undefined
         }
         onRevert={() => {
