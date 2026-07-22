@@ -72,7 +72,7 @@ export function WorkspaceTaskSheet({
   changeStatus: TaskChangeStatus | undefined;
   /** Rename the task file; resolves an error message or null on success. */
   onRename: (nextPath: string) => Promise<string | null>;
-  focusHeadline?: "select" | "end";
+  focusHeadline?: "select" | "end" | { caret: number };
   /** Bumped when the session was ended server-side (revert) — remounts the
    * editor so it reseeds instead of showing the dead session's text. */
   editorEpoch?: number;
@@ -148,7 +148,7 @@ function SheetBody({
   changeStatus: TaskChangeStatus | undefined;
   /** Rename the task file; resolves an error message or null on success. */
   onRename: (nextPath: string) => Promise<string | null>;
-  focusHeadline?: "select" | "end";
+  focusHeadline?: "select" | "end" | { caret: number };
   /** Bumped when the session was ended server-side (revert) — remounts the
    * editor so it reseeds instead of showing the dead session's text. */
   editorEpoch?: number;

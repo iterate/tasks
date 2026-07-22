@@ -22,7 +22,7 @@ export function WorkspaceTaskEditor({
   repoPath: string;
   path: string;
   redline: boolean;
-  focusHeadline?: "select" | "end";
+  focusHeadline?: "select" | "end" | { caret: number };
   apiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onStatus?: (status: string) => void;

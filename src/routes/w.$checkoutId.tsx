@@ -74,7 +74,11 @@ function WorkspaceBoardPage() {
   // filename trails the title until the first commit (same UX as the Yjs
   // board).
   const [draftPath, setDraftPath] = useState<string | null>(null);
-  const renamedDraftRef = useRef(false);
+  /** How the editor should focus when the DRAFT's sheet (re)mounts:
+   * "select" = fresh draft (typing replaces the headline), "end" = renamed
+   * while the caret was in the headline, {caret} = renamed while typing in
+   * the body (restore the offset), undefined = don't steal focus. */
+  const draftFocusRef = useRef<"select" | "end" | { caret: number } | undefined>(undefined);
   // The open sheet's live-doc API: mutations of the OPEN file go through the
   // live document (the board mirror is 200ms behind it — writing board state
   // over a live path would drop the newest keystrokes).
@@ -220,7 +224,6 @@ function WorkspaceBoardPage() {
       if (renamingRef.current) return;
       // Never collapse onto an existing file in the target folder — suffix.
       const nextPath = claimPath(taskPathInFolder(task.path, folder));
-      const wasOpen = search.task === task.path;
       // Navigate only once the write LANDED: the sheet must never open a
       // path that doesn't exist yet (racing the create), and the old editor
       // keeps the user's text until then. The final-frame carry runs after
@@ -234,8 +237,12 @@ function WorkspaceBoardPage() {
             await editorApiRef.current.flushPending();
           }
           // A moved draft is still the draft — title trailing keeps working.
-          setDraftPath((current) => (current === task.path ? nextPath : current));
-          if (wasOpen) patchSearch({ task: nextPath });
+          setDraftPath((current) => {
+            if (current === task.path) draftFocusRef.current = undefined;
+            return current === task.path ? nextPath : current;
+          });
+          // LIVE check: a sheet closed (or switched) mid-write stays put.
+          if (searchTaskRef.current === task.path) patchSearch({ task: nextPath });
         })
         .finally(() => {
           renamingRef.current = false;
@@ -283,7 +290,7 @@ function WorkspaceBoardPage() {
       claimedRef.current.set(target, Date.now());
       // Adding from a tag row: the task wears that tag from birth.
       const content = label === undefined ? file.content : setTaskCardLabels(file.content, [label]);
-      renamedDraftRef.current = false;
+      draftFocusRef.current = "select";
       setDraftPath(target);
       // The card shows instantly (optimistic), but the SHEET opens only once
       // the create landed — the collab editor must never seed an empty doc
@@ -349,7 +356,11 @@ function WorkspaceBoardPage() {
       const caret = editorApiRef.current?.path === draftPath
         ? editorApiRef.current.selectionHead()
         : -1;
-      const refocus = caret >= 0 && caret <= headlineEnd;
+      // Three intents, not a boolean: headline-caret renames park at the
+      // headline end; body-caret renames RESTORE the body offset; a closed
+      // sheet steals nothing.
+      const focusIntent: "end" | { caret: number } | undefined =
+        caret < 0 ? undefined : caret <= headlineEnd ? "end" : { caret };
       void current
         .renameTask(draftPath, target, source, (final) => final, async () => {
           // Flush the still-mounted editor FIRST: the hook awaits this, so
@@ -357,7 +368,7 @@ function WorkspaceBoardPage() {
           if (editorApiRef.current?.path === draftPath) {
             await editorApiRef.current.flushPending();
           }
-          renamedDraftRef.current = refocus;
+          draftFocusRef.current = focusIntent;
           setDraftPath((currentDraft) => (currentDraft === draftPath ? target : currentDraft));
           // Navigate by CURRENT truth: if the sheet still shows the source
           // (even under a newer title effect), it must follow the moved file
@@ -392,7 +403,6 @@ function WorkspaceBoardPage() {
       if (nextPath === task.path) return null;
       if (board.files?.[nextPath] !== undefined) return "A file already exists at that path.";
       if (renamingRef.current) return "A rename is already in progress — retry in a moment.";
-      const wasOpen = search.task === task.path;
       renamingRef.current = true;
       try {
         // The input's error line reports the REAL outcome — a failed create
@@ -406,8 +416,12 @@ function WorkspaceBoardPage() {
             if (editorApiRef.current?.path === task.path) {
               await editorApiRef.current.flushPending();
             }
-            setDraftPath((current) => (current === task.path ? nextPath : current));
-            if (wasOpen) patchSearch({ task: nextPath });
+            setDraftPath((current) => {
+              if (current === task.path) draftFocusRef.current = undefined;
+              return current === task.path ? nextPath : current;
+            });
+            // LIVE check — a closed sheet stays closed.
+            if (searchTaskRef.current === task.path) patchSearch({ task: nextPath });
           },
         );
       } finally {
@@ -532,11 +546,7 @@ function WorkspaceBoardPage() {
         redline={trackChanges}
         editorApiRef={editorApiRef}
         focusHeadline={
-          openTask !== null && openTask.path === draftPath
-            ? renamedDraftRef.current
-              ? "end"
-              : "select"
-            : undefined
+          openTask !== null && openTask.path === draftPath ? draftFocusRef.current : undefined
         }
         liveSource={() => {
           // Read the ref AT CALL TIME — it fills after mount without a

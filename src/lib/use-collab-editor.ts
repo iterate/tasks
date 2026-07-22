@@ -44,8 +44,9 @@ export function useCollabEditor(input: {
   /** Redline layers on at build time (kept in sync with toggle()). */
   redline: boolean;
   /** Place the caret on mount: select the `# headline` text (so typing
-   * replaces it — the new-task flow) or park at its end. */
-  focusHeadline?: "select" | "end";
+   * replaces it — the new-task flow), park at its end, or restore a body
+   * offset (post-rename remount while the user typed in the body). */
+  focusHeadline?: "select" | "end" | { caret: number };
   onLiveContent?: (path: string, content: string) => void;
   onStatus?: (status: string) => void;
   /** Filled with the live-doc API while the editor is mounted (see
@@ -167,15 +168,23 @@ export function useCollabEditor(input: {
           };
         }
         if (focusHeadline !== undefined) {
-          const heading = /^#\s+(.*)$/m.exec(opened.content);
-          if (heading !== null) {
-            const end = heading.index + heading[0].length;
-            const start = end - (heading[1]?.length ?? 0);
+          if (typeof focusHeadline === "object") {
+            // Body typing across a rename remount: put the caret back.
             view.dispatch({
               scrollIntoView: true,
-              selection:
-                focusHeadline === "select" ? { anchor: start, head: end } : { anchor: end },
+              selection: { anchor: Math.min(focusHeadline.caret, view.state.doc.length) },
             });
+          } else {
+            const heading = /^#\s+(.*)$/m.exec(opened.content);
+            if (heading !== null) {
+              const end = heading.index + heading[0].length;
+              const start = end - (heading[1]?.length ?? 0);
+              view.dispatch({
+                scrollIntoView: true,
+                selection:
+                  focusHeadline === "select" ? { anchor: start, head: end } : { anchor: end },
+              });
+            }
           }
           view.focus();
         }
