@@ -100,11 +100,30 @@ export class TasksCheckoutDurableObject extends YServer {
     );
   }
 
-  /** listTaskFiles both proves the token works and provides the seed. */
+  /** The seed read both proves the token works and provides the board.
+   * (The platform's listTaskFiles was ripped out of the OS repos API by
+   * iterate#2222; the legacy lane now composes it from listFiles + capped
+   * readFile — acceptable here, this lane retires with the workspace board.) */
   async #verifyAndSeed(dial: ProjectDial, repoPath: string): Promise<void> {
-    const listing = (await dial.withProject((project) =>
-      project.repos.get(repoPath).listTaskFiles(),
-    )) as { commitOid: string; files: Record<string, string> };
+    const listing = await dial.withProject(async (project) => {
+      const repo = project.repos.get(repoPath);
+      const { commitOid, paths } = (await repo.listFiles()) as {
+        commitOid: string;
+        paths: string[];
+      };
+      const taskPaths = paths.filter((path) => isTaskFilePath(path));
+      const files: Record<string, string> = {};
+      const lane = 16;
+      for (let start = 0; start < taskPaths.length; start += lane) {
+        await Promise.all(
+          taskPaths.slice(start, start + lane).map(async (path) => {
+            const file = (await repo.readFile({ commitOid, path })) as { content: string };
+            files[path] = file.content;
+          }),
+        );
+      }
+      return { commitOid, files };
+    });
     // Re-check after the await: a racing join may have seeded already.
     if (checkoutBaseCommit(this.document) !== undefined) return;
     this.document.transact(() => {
