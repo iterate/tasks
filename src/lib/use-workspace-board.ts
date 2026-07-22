@@ -117,8 +117,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
             for (const [path, kind] of next) if (changes.get(path) !== kind) moved.add(path);
             for (const path of changes.keys()) if (!next.has(path)) moved.add(path);
           }
-          versionsRef.current = versions;
-          if (moved.size === 0) return;
+          if (moved.size === 0) {
+            versionsRef.current = versions;
+            return;
+          }
           const fetched = await Promise.all(
             [...moved].map(
               async (path) => [boardKey(path), await lane((ws) => ws.read(`/${boardKey(path)}`))] as const,
@@ -126,8 +128,11 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
           );
           if (generation.current !== mine) return;
           // One epoch check for BOTH maps: fetched content that started
-          // before a local mutation is as stale as its badges.
+          // before a local mutation is as stale as its badges. Bail BEFORE
+          // recording versions — a skipped tick must leave the cursor
+          // behind so the next tick re-detects (and re-fetches) the paths.
           if (mutationEpoch.current !== epochBefore) return;
+          versionsRef.current = versions;
           if (status !== null) setChanges(next);
           setFiles((current) => {
             if (current === null) return current;

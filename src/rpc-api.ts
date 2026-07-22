@@ -286,6 +286,7 @@ type WorkspaceStub = {
     versions(): Promise<Record<string, number>>;
   };
   readBase(path: string): Promise<string | null>;
+  exists(path: string): Promise<boolean>;
   glob(pattern: string): Promise<string[]>;
   readFile(path: string): Promise<string | null>;
   readFiles(paths: string[]): Promise<Record<string, string | null>>;
@@ -393,8 +394,10 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
 
   /** The newest page of the workspace's stream events, newest first. */
   async events(limit = 50): Promise<WorkspaceStreamEvent[]> {
-    // Touch the workspace first so its birth events exist on first view.
-    await this.#withWorkspace(async () => undefined);
+    // A REAL workspace call: on a fresh checkout it throws the
+    // missing-workspace error, which is what makes #withWorkspace lazily
+    // create it — so the stream (and its birth events) exist to read.
+    await this.#withWorkspace((ws) => ws.exists("/"));
     const events = (await this.#dial.withProject(async (project) => {
       const streams = (
         project as unknown as {
@@ -424,8 +427,8 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
     processEventBatch: (batch: { events: WorkspaceStreamEvent[] }) => unknown,
     afterOffset = 0,
   ): Promise<{ unsubscribe(): void }> {
-    // Touch the workspace first so its birth events exist on first view.
-    await this.#withWorkspace(async () => undefined);
+    // A real call (see events()) so lazy creation actually runs.
+    await this.#withWorkspace((ws) => ws.exists("/"));
     return this.#dial.withProject(async (project) => {
       const streams = (
         project as unknown as {

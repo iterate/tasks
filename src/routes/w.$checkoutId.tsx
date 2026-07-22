@@ -81,17 +81,21 @@ function WorkspaceBoardPage() {
   // state, so two rapid adds/moves in one frame would both see it stale and
   // collapse onto one filename without this synchronous guard.
   const claimedRef = useRef(new Set<string>());
-  const claimPath = useCallback(
-    (desired: string): string => {
-      const target = unclaimedPath(
-        desired,
-        (path) => board.files?.[path] !== undefined || claimedRef.current.has(path),
-      );
-      claimedRef.current.add(target);
-      return target;
-    },
-    [board.files],
-  );
+  // Fresh board state for timers/claims WITHOUT depending on the board
+  // object (recreated every render — depending on it would reset debounces
+  // on every keystroke reflect and poll tick).
+  const boardRef = useRef(board);
+  useEffect(() => {
+    boardRef.current = board;
+  });
+  const claimPath = useCallback((desired: string): string => {
+    const target = unclaimedPath(
+      desired,
+      (path) => boardRef.current.files?.[path] !== undefined || claimedRef.current.has(path),
+    );
+    claimedRef.current.add(target);
+    return target;
+  }, []);
 
   /** Live text of the open file, else the board's copy. */
   const sourceOf = useCallback((task: BoardTask): string => {
@@ -221,15 +225,25 @@ function WorkspaceBoardPage() {
 
   // While the draft's sheet is open and it is still an uncommitted add, its
   // filename trails the headline (debounced so half-typed titles don't churn
-  // paths).
+  // paths). Dependencies are the TITLE and folder — not the board object,
+  // which changes every render and would reset the 700ms timer forever.
+  const draftTask = useMemo(
+    () =>
+      draftPath !== null && search.task === draftPath && board.changes.get(draftPath) === "added"
+        ? (board.tasks.find((candidate) => candidate.path === draftPath) ?? null)
+        : null,
+    [board.changes, board.tasks, draftPath, search.task],
+  );
+  const draftTitle = draftTask?.title;
+  const draftFolder = draftTask?.folder;
   useEffect(() => {
-    if (draftPath === null || search.task !== draftPath) return;
-    if (board.changes.get(draftPath) !== "added") return;
-    const task = board.tasks.find((candidate) => candidate.path === draftPath);
-    if (task === undefined) return;
-    const desired = taskPathInFolder(taskPathForTitle(task.title), task.folder);
+    if (draftPath === null || draftTitle === undefined || draftFolder === undefined) return;
+    const desired = taskPathInFolder(taskPathForTitle(draftTitle), draftFolder);
     if (desired === draftPath) return;
     const timer = setTimeout(() => {
+      const current = boardRef.current;
+      const task = current.tasks.find((candidate) => candidate.path === draftPath);
+      if (task === undefined || current.changes.get(draftPath) !== "added") return;
       // The LIVE doc, not the board mirror — the mirror is debounced and a
       // rename must never persist a version missing the newest keystrokes.
       const source = sourceOf(task);
@@ -239,7 +253,7 @@ function WorkspaceBoardPage() {
       renamedDraftRef.current = true;
       setDraftPath(target);
       patchSearch({ task: target });
-      void board.renameTask(draftPath, target, source).then((ok) => {
+      void current.renameTask(draftPath, target, source).then((ok) => {
         if (ok) return;
         // The write failed and the board rolled back — follow it.
         renamedDraftRef.current = false;
@@ -248,7 +262,7 @@ function WorkspaceBoardPage() {
       });
     }, 700);
     return () => clearTimeout(timer);
-  }, [draftPath, search.task, board, claimPath, patchSearch, sourceOf]);
+  }, [draftPath, draftTitle, draftFolder, claimPath, patchSearch, sourceOf]);
 
   // The sheet's path field: any rename the board can represent is allowed —
   // the file must stay a task (.md under a folder named "tasks").
