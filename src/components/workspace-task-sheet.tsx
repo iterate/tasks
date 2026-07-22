@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState } from "react";
+import { ClientOnly } from "@tanstack/react-router";
 import { RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { Input } from "../ui/input.tsx";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../ui/sheet.tsx";
@@ -33,6 +34,12 @@ const WorkspaceTaskEditor = lazy(() =>
   })),
 );
 
+const WorkspaceTaskReview = lazy(() =>
+  import("./workspace-task-review.tsx").then((module) => ({
+    default: module.WorkspaceTaskReview,
+  })),
+);
+
 /**
  * The task detail sheet on the WORKSPACE lane: the shared collab-editor
  * state machine (rebase model over the vessel WS) with the redline layers
@@ -55,6 +62,10 @@ export function WorkspaceTaskSheet({
   onRevert,
   onDelete,
   onClose,
+  view,
+  selectedAnnotationId,
+  onSelectAnnotation,
+  onViewChange,
 }: {
   task: BoardTask | null;
   checkoutId: string;
@@ -75,6 +86,10 @@ export function WorkspaceTaskSheet({
   onRevert: () => void;
   onDelete: () => void;
   onClose: () => void;
+  view: "edit" | "review";
+  selectedAnnotationId: string | null;
+  onSelectAnnotation: (id: string | null) => void;
+  onViewChange: (view: "edit" | "review") => void;
 }) {
   return (
     <Sheet open={task !== null} onOpenChange={(open) => (open ? undefined : onClose())}>
@@ -100,6 +115,10 @@ export function WorkspaceTaskSheet({
             onChangeLabels={onChangeLabels}
             onRevert={onRevert}
             onDelete={onDelete}
+            view={view}
+            selectedAnnotationId={selectedAnnotationId}
+            onSelectAnnotation={onSelectAnnotation}
+            onViewChange={onViewChange}
           />
         )}
       </SheetContent>
@@ -123,6 +142,10 @@ function SheetBody({
   onChangeLabels,
   onRevert,
   onDelete,
+  view,
+  selectedAnnotationId,
+  onSelectAnnotation,
+  onViewChange,
 }: {
   task: BoardTask;
   checkoutId: string;
@@ -142,6 +165,10 @@ function SheetBody({
   onChangeLabels: (labels: string[]) => void;
   onRevert: () => void;
   onDelete: () => void;
+  view: "edit" | "review";
+  selectedAnnotationId: string | null;
+  onSelectAnnotation: (id: string | null) => void;
+  onViewChange: (view: "edit" | "review") => void;
 }) {
   const [status, setStatus] = useState("connecting…");
   // The path is editable in place; SheetBody is keyed by task.path, so a
@@ -198,6 +225,24 @@ function SheetBody({
         {pathError !== null && <p className="text-xs text-red-700">{pathError}</p>}
       </SheetHeader>
       <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-2 border-b px-4 py-1.5">
+        <div className="flex rounded-md border bg-muted/40 p-0.5" aria-label="Task view">
+          <Button
+            variant={view === "edit" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 px-2.5"
+            onClick={() => onViewChange("edit")}
+          >
+            Edit
+          </Button>
+          <Button
+            variant={view === "review" ? "secondary" : "ghost"}
+            size="sm"
+            className="h-7 px-2.5"
+            onClick={() => onViewChange("review")}
+          >
+            Review
+          </Button>
+        </div>
         <Select
           items={columns.map((state) => ({ label: stateLabel(state), value: state }))}
           value={columnState(task, columns)}
@@ -221,7 +266,9 @@ function SheetBody({
         </Select>
         <TagPicker value={task.labels} options={allTags} onChange={onChangeLabels} />
         <div className="ml-auto flex items-center gap-1">
-          <span className="font-mono text-[11px] text-muted-foreground">{status}</span>
+          {view === "edit" ? (
+            <span className="font-mono text-[11px] text-muted-foreground">{status}</span>
+          ) : null}
           {changeStatus === undefined ? null : (
             <Button
               variant="ghost"
@@ -266,21 +313,40 @@ function SheetBody({
           </AlertDialog>
         </div>
       </div>
-      <Suspense
-        fallback={<p className="p-4 text-sm text-muted-foreground">Loading editor…</p>}
-      >
-        <WorkspaceTaskEditor
-          key={editorEpoch ?? 0}
-          checkoutId={checkoutId}
-          repoPath={repoPath}
-          path={task.path}
-          redline={true}
-          focusHeadline={focusHeadline}
-          apiRef={editorApiRef}
-          onLiveContent={onLiveContent}
-          onStatus={setStatus}
-        />
-      </Suspense>
+      {view === "edit" ? (
+        <Suspense
+          fallback={<p className="p-4 text-sm text-muted-foreground">Loading editor…</p>}
+        >
+          <WorkspaceTaskEditor
+            key={editorEpoch ?? 0}
+            checkoutId={checkoutId}
+            repoPath={repoPath}
+            path={task.path}
+            redline={true}
+            focusHeadline={focusHeadline}
+            apiRef={editorApiRef}
+            onLiveContent={onLiveContent}
+            onStatus={setStatus}
+          />
+        </Suspense>
+      ) : (
+        <ClientOnly
+          fallback={<p className="p-4 text-sm text-muted-foreground">Loading review…</p>}
+        >
+          <Suspense
+            fallback={<p className="p-4 text-sm text-muted-foreground">Loading review…</p>}
+          >
+            <WorkspaceTaskReview
+              checkoutId={checkoutId}
+              repoPath={repoPath}
+              path={task.path}
+              markdown={task.source}
+              selectedAnnotationId={selectedAnnotationId}
+              onSelectAnnotation={onSelectAnnotation}
+            />
+          </Suspense>
+        </ClientOnly>
+      )}
     </div>
   );
 }

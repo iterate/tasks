@@ -2,4 +2,14 @@
 # caught and unpublished within days) and never accept weakened trust
 # signals on update.
 minimumReleaseAge: 10080
+
+overrides:
+  '@opentui/core': 0.4.3
+  '@opentui/react': 0.4.3
+  '@tailwindcss/oxide': 4.3.2
+  lightningcss: 1.32.0
+
+patchedDependencies:
+  '@plannotator/ui@0.28.0': patches/@plannotator__ui@0.28.0.patch
+
 trustPolicy: no-downgrade

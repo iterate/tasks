@@ -43,6 +43,7 @@ import {
  */
 export const Route = createFileRoute("/w/$checkoutId")({
   validateSearch: (search: Record<string, unknown>) => ({
+    annotation: typeof search.annotation === "string" ? search.annotation : "",
     group:
       search.group === "none" || search.group === "label"
         ? (search.group as "none" | "label")
@@ -50,6 +51,7 @@ export const Route = createFileRoute("/w/$checkoutId")({
     q: typeof search.q === "string" ? search.q : "",
     repo: typeof search.repo === "string" ? search.repo : DEFAULT_REPO_PATH,
     task: typeof search.task === "string" ? search.task : "",
+    view: search.view === "review" ? ("review" as const) : ("edit" as const),
   }),
   component: WorkspaceBoardPage,
 });
@@ -209,7 +211,7 @@ function WorkspaceBoardPage() {
       renamingRef.current = true;
       void board
         .renameTask(task.path, nextPath, transform(sourceOf(task)), transform, () => {
-          if (wasOpen) patchSearch({ task: nextPath });
+          if (wasOpen) patchSearch({ annotation: "", task: nextPath });
         })
         .finally(() => {
           renamingRef.current = false;
@@ -285,7 +287,7 @@ function WorkspaceBoardPage() {
         .renameTask(draftPath, target, source, (final) => final, () => {
           renamedDraftRef.current = true;
           setDraftPath(target);
-          patchSearch({ task: target });
+          patchSearch({ annotation: "", task: target });
         })
         .finally(() => {
           renamingRef.current = false;
@@ -312,7 +314,7 @@ function WorkspaceBoardPage() {
         // must not read as accepted.
         return await board.renameTask(task.path, nextPath, sourceOf(task), (final) => final, () => {
           setDraftPath((current) => (current === task.path ? nextPath : current));
-          if (wasOpen) patchSearch({ task: nextPath });
+          if (wasOpen) patchSearch({ annotation: "", task: nextPath });
         });
       } finally {
         renamingRef.current = false;
@@ -403,7 +405,7 @@ function WorkspaceBoardPage() {
           recentByPath={new Map()}
           onMove={moveTask}
           onAdd={addTask}
-          onOpen={(path) => patchSearch({ task: path })}
+          onOpen={(path) => patchSearch({ annotation: "", task: path })}
         />
       )}
       <StreamEventsSheet
@@ -433,6 +435,18 @@ function WorkspaceBoardPage() {
         onRename={(nextPath) =>
           openTask === null ? Promise.resolve(null) : renameTask(openTask, nextPath)
         }
+        view={search.view}
+        selectedAnnotationId={search.annotation || null}
+        onSelectAnnotation={(id) => patchSearch({ annotation: id || "" })}
+        onViewChange={(view) => {
+          if (view === "review" && openTask !== null) {
+            const editor = editorApiRef.current;
+            if (editor !== null && editor.path === openTask.path) {
+              board.reflectLiveContent(openTask.path, editor.source());
+            }
+          }
+          patchSearch({ annotation: "", view });
+        }}
         editorEpoch={editorEpoch}
         editorApiRef={editorApiRef}
         focusHeadline={
@@ -453,10 +467,10 @@ function WorkspaceBoardPage() {
         onDelete={() => {
           if (openTask !== null) {
             board.deleteTask(openTask.path);
-            patchSearch({ task: "" });
+            patchSearch({ annotation: "", task: "" });
           }
         }}
-        onClose={() => patchSearch({ task: "" })}
+        onClose={() => patchSearch({ annotation: "", task: "" })}
       />
     </>
   );
