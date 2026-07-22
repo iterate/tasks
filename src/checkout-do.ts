@@ -111,14 +111,20 @@ export class TasksCheckoutDurableObject extends YServer {
         commitOid: string;
         paths: string[];
       };
-      const taskPaths = paths.filter((path) => isTaskFilePath(path));
+      // Keys are REPO-RELATIVE (no leading slash) — the doc's key shape
+      // everywhere else; reads keep the listing's original path.
+      const taskPaths = paths
+        .map((path) => ({ key: path.replace(/^\/+/, ""), path }))
+        .filter((entry) => isTaskFilePath(entry.key));
       const files: Record<string, string> = {};
       const lane = 16;
       for (let start = 0; start < taskPaths.length; start += lane) {
         await Promise.all(
-          taskPaths.slice(start, start + lane).map(async (path) => {
-            const file = (await repo.readFile({ commitOid, path })) as { content: string };
-            files[path] = file.content;
+          taskPaths.slice(start, start + lane).map(async (entry) => {
+            const file = (await repo.readFile({ commitOid, path: entry.path })) as {
+              content: string;
+            };
+            files[entry.key] = file.content;
           }),
         );
       }

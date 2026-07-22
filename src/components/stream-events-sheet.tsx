@@ -52,6 +52,7 @@ export function StreamEventsSheet({
     };
 
     const connect = (afterOffset: number) => {
+      if (connecting) return; // single-flight — overlapping failures share one
       connecting = true;
       subscribe(onBatch, Math.max(0, afterOffset)).then(
         (opened) => {
@@ -76,9 +77,10 @@ export function StreamEventsSheet({
     // The subscription rides the capnweb WS — a redial (any RPC failure
     // elsewhere disposes the session) silently drops it. Heartbeat the
     // handle and resubscribe from the last seen offset when it dies.
+    let pinging = false;
     const heartbeat = setInterval(() => {
       void (async () => {
-        if (cancelled) return;
+        if (cancelled || pinging) return; // a slow ping owns the verdict
         if (handle === null) {
           // A failed (re)connect must keep retrying — a dead handle with no
           // retry would leave the sheet reading "live" forever.
@@ -88,6 +90,7 @@ export function StreamEventsSheet({
           }
           return;
         }
+        pinging = true;
         try {
           if ((await handle.ping?.()) === false) throw new Error("subscription lapsed");
         } catch {
@@ -100,6 +103,8 @@ export function StreamEventsSheet({
           }
           handle = null;
           connect(lastOffset.current);
+        } finally {
+          pinging = false;
         }
       })();
     }, 10_000);

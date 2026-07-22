@@ -17,6 +17,11 @@ PROXY_PORT="${PROXY_PORT:-5200}"
 
 # 1. Platform: start (or reuse) the os dev server; discover its port.
 (cd "$OS_DIR" && pnpm dev start --detach >/dev/null 2>&1 || true)
+# A cold start writes the descriptor asynchronously — wait for it.
+for _ in $(seq 1 60); do
+  [ -f "$OS_DIR/.dev-server/dev-server.json" ] && break
+  sleep 1
+done
 OS_URL=$(node -e "
   const { readFileSync } = require('fs');
   const info = JSON.parse(readFileSync('$OS_DIR/.dev-server/dev-server.json', 'utf8'));
