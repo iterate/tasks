@@ -224,6 +224,8 @@ function WorkspaceBoardPage() {
       renamingRef.current = true;
       void board
         .renameTask(task.path, nextPath, transform(sourceOf(task)), transform, () => {
+          // A moved draft is still the draft — title trailing keeps working.
+          setDraftPath((current) => (current === task.path ? nextPath : current));
           if (wasOpen) patchSearch({ task: nextPath });
         })
         .finally(() => {
@@ -274,10 +276,14 @@ function WorkspaceBoardPage() {
     if (draftPath === null || draftTitle === undefined || draftFolder === undefined) return;
     const desired = taskPathInFolder(taskPathForTitle(draftTitle), draftFolder);
     if (desired === draftPath) return;
-    const timer = setTimeout(() => {
-      // An in-flight rename owns the draft: skip; onWritten changes
-      // draftPath, which re-runs this effect for any further title drift.
-      if (renamingRef.current) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const attempt = () => {
+      // Another rename lane holds the lock (a drag, a path edit on another
+      // task): re-arm instead of stalling until the next title change.
+      if (renamingRef.current) {
+        timer = setTimeout(attempt, 700);
+        return;
+      }
       const current = boardRef.current;
       const task = current.tasks.find((candidate) => candidate.path === draftPath);
       if (task === undefined || current.changes.get(draftPath) !== "added") return;
@@ -299,7 +305,8 @@ function WorkspaceBoardPage() {
         .finally(() => {
           renamingRef.current = false;
         });
-    }, 700);
+    };
+    timer = setTimeout(attempt, 700);
     return () => clearTimeout(timer);
   }, [draftPath, draftTitle, draftFolder, claimPath, patchSearch, sourceOf]);
 

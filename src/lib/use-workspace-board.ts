@@ -96,6 +96,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   // must not overwrite newer local state — badges OR file content. The next
   // tick reconciles with server truth.
   const mutationEpoch = useRef(0);
+  // Live keystrokes bump PER-PATH epochs, not the global one: typing must
+  // only shield its own file from stale poll fetches — remote updates to
+  // other cards keep flowing while someone types.
+  const pathEpochs = useRef(new Map<string, number>());
   useEffect(() => {
     const mine = generation.current;
     const timer = setInterval(() => {
@@ -105,6 +109,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       // cadence and after mutations/commits.
       const wantStatus = tickRef.current++ % 4 === 0;
       const epochBefore = mutationEpoch.current;
+      const pathEpochsBefore = new Map(pathEpochs.current);
       void Promise.all([
         lane((ws) => ws.versions()),
         wantStatus ? lane((ws) => ws.status()) : Promise.resolve(null),
@@ -145,6 +150,8 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
             if (current === null) return current;
             const merged = { ...current };
             for (const [path, content] of fetched) {
+              // A keystroke landed on this path mid-poll: its fetch is stale.
+              if (pathEpochs.current.get(path) !== pathEpochsBefore.get(path)) continue;
               if (content === null) delete merged[path];
               else merged[path] = content;
             }
@@ -269,7 +276,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   /** Live content from an open editor session — keeps the card current
    * while typing without waiting for the flush + poll round trip. */
   const reflectLiveContent = useCallback((path: string, content: string) => {
-    mutationEpoch.current++;
+    pathEpochs.current.set(path, (pathEpochs.current.get(path) ?? 0) + 1);
     setFiles((current) => {
       if (current === null || current[path] === content) return current;
       // A live edit IS dirtiness: commit controls must arm on the first
@@ -306,6 +313,11 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       /** Runs once the write RPC landed — the moment navigation is safe. */
       onWritten?: () => void,
     ): Promise<string | null> => {
+      // The pre-write server head: the carry must only fire when the OLD
+      // session genuinely advanced after this point — comparing against our
+      // written content would let an older server head overwrite unpushed
+      // local text that exists nowhere else.
+      const baseline = await lane((ws) => ws.read(`/${fromPath}`)).catch(() => null);
       try {
         await lane((ws) => ws.write(`/${toPath}`, content));
       } catch (cause) {
@@ -330,7 +342,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       onWritten?.();
       try {
         const final = await lane((ws) => ws.read(`/${fromPath}`));
-        if (final !== null) {
+        if (final !== null && final !== baseline) {
           const carried = carry(final);
           if (carried !== content) {
             await lane((ws) => ws.write(`/${toPath}`, carried));
