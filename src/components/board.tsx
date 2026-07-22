@@ -99,9 +99,18 @@ export function Board({
                 >
                   <TaskStateIcon state={column.state} />
                   <h2 className="truncate text-sm font-medium">{stateLabel(column.state)}</h2>
-                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                  <span className="text-xs tabular-nums text-muted-foreground">
                     {filterActive ? `${column.visible}/${column.total}` : column.total}
                   </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 w-7 px-0 text-muted-foreground/60 hover:text-foreground"
+                    aria-label={`Add task to ${stateLabel(column.state)}`}
+                    onClick={() => onAdd(column.state, null)}
+                  >
+                    <PlusIcon aria-hidden className="size-4" />
+                  </Button>
                 </div>
               ))}
             </div>
@@ -229,11 +238,11 @@ function BoardCell({
         <Button
           variant="ghost"
           size="sm"
-          className="mt-1 h-8 w-full justify-center text-xs text-muted-foreground opacity-0 transition-opacity group-hover/cell:opacity-100 focus-visible:opacity-100"
+          aria-label="New task"
+          className="mt-1 h-8 w-full justify-center text-muted-foreground/60 opacity-0 transition-opacity group-hover/cell:opacity-100 focus-visible:opacity-100 hover:text-foreground"
           onClick={() => onAdd(state, rowValue)}
         >
-          <PlusIcon aria-hidden className="size-3.5" />
-          New task
+          <PlusIcon aria-hidden className="size-4" />
         </Button>
       </div>
     </section>

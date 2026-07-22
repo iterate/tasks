@@ -63,31 +63,20 @@ function titleOffset(source: string, title: string): number | null {
   return heading.index + heading[0].indexOf(heading[1]!);
 }
 
-/** The path segments between the `tasks` directory and the filename. */
+/** A task's folder is simply its DIRECTORY — the whole path minus the
+ * filename: `tasks/design/board-parity.md` → `tasks/design`,
+ * `apps/some-app/tasks/banana.md` → `apps/some-app/tasks`. */
 export function taskFolder(path: string): string {
-  // The folder is the prefix BEFORE the tasks/ segment:
-  //   tasks/x.md              → "/"
-  //   some/folder/tasks/x.md  → "some/folder"
-  //   bla/tasks/x.md          → "bla"
-  // (Segments after tasks/ stay part of the filename grouping-wise.)
   const segments = path.split("/").filter(Boolean);
-  const tasksIndex = segments.lastIndexOf("tasks");
-  const before = tasksIndex <= 0 ? [] : segments.slice(0, tasksIndex);
-  return before.length === 0 ? "/" : before.join("/");
+  return segments.slice(0, -1).join("/") || "tasks";
 }
 
 /** Rebuild a task's path for a (possibly different) folder, keeping the
- * filename and any subpath below tasks/. Always emits a NORMALIZED path —
- * split/filter makes double slashes unrepresentable. */
+ * filename. Always emits a NORMALIZED path — split/filter makes double
+ * slashes unrepresentable. */
 export function taskPathInFolder(path: string, folder: string): string {
-  const segments = path.split("/").filter(Boolean);
-  const tasksIndex = segments.lastIndexOf("tasks");
-  const below = segments.slice(tasksIndex + 1);
-  const prefix = folder
-    .split("/")
-    .filter(Boolean)
-    .filter((segment) => segment !== "/");
-  return [...prefix, "tasks", ...below].join("/");
+  const filename = path.split("/").filter(Boolean).at(-1) ?? path;
+  return [...folder.split("/").filter(Boolean), filename].join("/");
 }
 
 function taskSummary(source: string): { text: string; from: number } {

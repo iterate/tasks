@@ -54,7 +54,7 @@ describe("projectBoard", () => {
 
   it("groups by folder with the root row first", () => {
     const projection = projectBoard({ tasks, filter: "", rowField: "folder" });
-    expect(projection.rows.map((row) => row.label)).toEqual(["/", "sub"]);
+    expect(projection.rows.map((row) => row.label)).toEqual(["sub/tasks", "tasks"]);
   });
 
   it("renders one flat row without grouping", () => {

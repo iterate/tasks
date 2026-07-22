@@ -204,11 +204,11 @@ function WorkspaceBoardPage() {
         board.files?.[path] !== undefined || claimedRef.current.has(path);
       let title = "New task";
       let file = newTaskFile({ state, title });
-      let target = taskPathInFolder(file.path, folder ?? "/");
+      let target = taskPathInFolder(file.path, folder ?? "tasks");
       for (let suffix = 2; taken(target); suffix++) {
         title = `New task ${suffix}`;
         file = newTaskFile({ state, title });
-        target = taskPathInFolder(file.path, folder ?? "/");
+        target = taskPathInFolder(file.path, folder ?? "tasks");
       }
       claimedRef.current.add(target);
       board.writeTask(target, file.content);
