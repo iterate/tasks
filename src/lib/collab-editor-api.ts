@@ -14,6 +14,10 @@ export interface CollabEditorApi {
   source(): string;
   /** The caret position (doc offset), synchronously. */
   selectionHead(): number;
+  /** Push any unconfirmed local edits (one quiet try) and resolve when the
+   * attempt finished — rename lanes await this before reading the old
+   * session's head, so the carry can't race the final keystrokes. */
+  flushPending(): Promise<void>;
   /** Apply `transform` to the live doc as a minimal splice (concurrent
    * edits outside the changed region survive; the redline stays truthful). */
   applyTransform(transform: (source: string) => string): void;

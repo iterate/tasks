@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Compartment, EditorState, type Extension } from "@codemirror/state";
+import { getSyncedVersion, sendableUpdates } from "@codemirror/collab";
 import { EditorView } from "@codemirror/view";
 import { CollabConnection, peerExtension, setCollabDisplayName } from "./collab-client.ts";
 import { whoami } from "./use-checkout.ts";
@@ -154,6 +155,11 @@ export function useCollabEditor(input: {
               live.dispatch({
                 changes: { from: start, insert: next.slice(start, endNext), to: endCurrent },
               });
+            },
+            flushPending: async () => {
+              const pending = sendableUpdates(live.state);
+              if (pending.length === 0) return;
+              await connection.pushOnce(getSyncedVersion(live.state), pending).catch(() => {});
             },
             path,
             selectionHead: () => live.state.selection.main.head,

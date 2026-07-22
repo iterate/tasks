@@ -322,8 +322,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       toPath: string,
       content: string,
       carry: (finalSource: string) => string = (source) => source,
-      /** Runs once the write RPC landed — the moment navigation is safe. */
-      onWritten?: () => void,
+      /** Runs once the write RPC landed — the moment navigation is safe.
+       * AWAITED before the carry read: lanes flush the old editor here so
+       * the carry sees its final keystrokes. */
+      onWritten?: () => void | Promise<void>,
     ): Promise<string | null> => {
       // The pre-write server head: the carry must only fire when the OLD
       // session genuinely advanced after this point — comparing against our
@@ -351,7 +353,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         const { [fromPath]: _gone, ...rest } = current;
         return { ...rest, [toPath]: content };
       });
-      onWritten?.();
+      await onWritten?.();
       try {
         const final = await lane((ws) => ws.read(`/${fromPath}`));
         if (final !== null && final !== baseline) {

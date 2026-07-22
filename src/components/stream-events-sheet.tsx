@@ -56,8 +56,14 @@ export function StreamEventsSheet({
       subscribe(onBatch, Math.max(0, afterOffset)).then(
         (opened) => {
           connecting = false;
-          if (cancelled) opened.unsubscribe();
-          else handle = opened;
+          if (cancelled) {
+            opened.unsubscribe();
+            return;
+          }
+          handle = opened;
+          // An open handle on an empty stream is live with zero events,
+          // not stuck "Connecting…".
+          setStatus("live");
         },
         (cause: unknown) => {
           connecting = false;

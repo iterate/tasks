@@ -227,7 +227,12 @@ function WorkspaceBoardPage() {
       // the navigation unmounts it.
       renamingRef.current = true;
       void board
-        .renameTask(task.path, nextPath, transform(sourceOf(task)), transform, () => {
+        .renameTask(task.path, nextPath, transform(sourceOf(task)), transform, async () => {
+          // Flush the still-mounted editor first (awaited by the hook), so
+          // the carry read sees the final keystrokes.
+          if (editorApiRef.current?.path === task.path) {
+            await editorApiRef.current.flushPending();
+          }
           // A moved draft is still the draft — title trailing keeps working.
           setDraftPath((current) => (current === task.path ? nextPath : current));
           if (wasOpen) patchSearch({ task: nextPath });
@@ -346,7 +351,12 @@ function WorkspaceBoardPage() {
         : -1;
       const refocus = caret >= 0 && caret <= headlineEnd;
       void current
-        .renameTask(draftPath, target, source, (final) => final, () => {
+        .renameTask(draftPath, target, source, (final) => final, async () => {
+          // Flush the still-mounted editor FIRST: the hook awaits this, so
+          // the carry read sees the final keystrokes.
+          if (editorApiRef.current?.path === draftPath) {
+            await editorApiRef.current.flushPending();
+          }
           renamedDraftRef.current = refocus;
           setDraftPath((currentDraft) => (currentDraft === draftPath ? target : currentDraft));
           // Navigate by CURRENT truth: if the sheet still shows the source
@@ -387,10 +397,19 @@ function WorkspaceBoardPage() {
       try {
         // The input's error line reports the REAL outcome — a failed create
         // must not read as accepted.
-        return await board.renameTask(task.path, nextPath, sourceOf(task), (final) => final, () => {
-          setDraftPath((current) => (current === task.path ? nextPath : current));
-          if (wasOpen) patchSearch({ task: nextPath });
-        });
+        return await board.renameTask(
+          task.path,
+          nextPath,
+          sourceOf(task),
+          (final) => final,
+          async () => {
+            if (editorApiRef.current?.path === task.path) {
+              await editorApiRef.current.flushPending();
+            }
+            setDraftPath((current) => (current === task.path ? nextPath : current));
+            if (wasOpen) patchSearch({ task: nextPath });
+          },
+        );
       } finally {
         renamingRef.current = false;
       }
@@ -519,11 +538,14 @@ function WorkspaceBoardPage() {
               : "select"
             : undefined
         }
-        liveSource={
-          editorApiRef.current?.path === openTask?.path
-            ? () => editorApiRef.current?.source() ?? null
-            : undefined
-        }
+        liveSource={() => {
+          // Read the ref AT CALL TIME — it fills after mount without a
+          // re-render, so a render-time conditional would miss it.
+          const api = editorApiRef.current;
+          return api !== null && openTask !== null && api.path === openTask.path
+            ? api.source()
+            : null;
+        }}
         onRevert={() => {
           if (openTask === null) return;
           // Remount only AFTER the revert RPC ended the old session — an
