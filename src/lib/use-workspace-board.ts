@@ -96,6 +96,10 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   // must not overwrite newer local state — badges OR file content. The next
   // tick reconciles with server truth.
   const mutationEpoch = useRef(0);
+  // In-flight mutation RPCs: the poll discards while any are mid-air — an
+  // epoch only marks transitions; this covers the whole window (e.g. a
+  // rename's source living on server-side through onWritten/carry/delete).
+  const pendingMutations = useRef(0);
   // Live keystrokes bump PER-PATH epochs, not the global one: typing must
   // only shield its own file from stale poll fetches — remote updates to
   // other cards keep flowing while someone types.
@@ -148,7 +152,9 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
           // before a local mutation is as stale as its badges. Bail BEFORE
           // recording versions — a skipped tick must leave the cursor
           // behind so the next tick re-detects (and re-fetches) the paths.
-          if (mutationEpoch.current !== epochBefore) return;
+          // Also bail while any mutation RPC is mid-air: the epoch marks
+          // transitions, the counter covers the whole window.
+          if (mutationEpoch.current !== epochBefore || pendingMutations.current > 0) return;
           versionsRef.current = versions;
           if (status !== null) setChanges(next);
           setFiles((current) => {
@@ -196,6 +202,16 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
 
   /** Roll one path's optimistic files+changes state back to what a failed
    * RPC left behind on the server (shared by write and delete). */
+  /** Run one mutation RPC with the in-flight counter held. */
+  const tracked = useCallback(async <T,>(work: Promise<T>): Promise<T> => {
+    pendingMutations.current++;
+    try {
+      return await work;
+    } finally {
+      pendingMutations.current--;
+    }
+  }, []);
+
   const restoreOnFailure = useCallback(
     (path: string, priorContent: string | undefined, priorChange: TaskChangeStatus | undefined) =>
       (cause: unknown) => {
@@ -241,7 +257,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         });
         return current === null ? current : { ...current, [path]: content };
       });
-      return lane((ws) => ws.write(`/${path}`, content)).then(
+      return tracked(lane((ws) => ws.write(`/${path}`, content))).then(
         () => {
           // Close the race window: a poll that STARTED during this RPC read
           // pre-write state — the landing bump makes its apply-time check
@@ -255,7 +271,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         },
       );
     },
-    [lane, restoreOnFailure],
+    [lane, restoreOnFailure, tracked],
   );
 
   const deleteTask = useCallback(
@@ -281,14 +297,14 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       });
       // The workspace still has the file on failure — put the card (and its
       // badge) back instead of pretending the delete happened.
-      void lane((ws) => ws.delete(`/${path}`)).then(
+      void tracked(lane((ws) => ws.delete(`/${path}`))).then(
         () => {
           mutationEpoch.current++; // see writeTask — cover the whole window
         },
         (cause: unknown) => restoreOnFailure(path, priorContent, priorChange)(cause),
       );
     },
-    [lane, restoreOnFailure],
+    [lane, restoreOnFailure, tracked],
   );
 
   /** Live content from an open editor session — keeps the card current
@@ -342,7 +358,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       // local text that exists nowhere else.
       const baseline = await lane((ws) => ws.read(`/${fromPath}`)).catch(() => null);
       try {
-        await lane((ws) => ws.write(`/${toPath}`, content));
+        await tracked(lane((ws) => ws.write(`/${toPath}`, content)));
       } catch (cause) {
         const message = cause instanceof Error ? cause.message : String(cause);
         setError(message);
@@ -362,6 +378,11 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         const { [fromPath]: _gone, ...rest } = current;
         return { ...rest, [toPath]: content };
       });
+      // The whole tail (navigate, carry, delete) keeps the counter held —
+      // the source lives server-side until the delete lands, and a poll in
+      // that window must not resurrect it beside the new card.
+      pendingMutations.current++;
+      try {
       await onWritten?.();
       try {
         const final = await lane((ws) => ws.read(`/${fromPath}`));
@@ -378,15 +399,19 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       } catch {
         // The carry is best-effort; the source still gets deleted below.
       }
-      void lane((ws) => ws.delete(`/${fromPath}`)).then(
-        () => {
-          mutationEpoch.current++; // a poll mid-delete read fromPath alive
-        },
-        () => {},
-      );
+      try {
+        await lane((ws) => ws.delete(`/${fromPath}`));
+        mutationEpoch.current++; // a poll mid-delete read fromPath alive
+      } catch {
+        // The delete failed — the server still HAS the source; the next
+        // poll re-showing it is truthful reconciliation.
+      }
+      } finally {
+        pendingMutations.current--;
+      }
       return null;
     },
-    [lane],
+    [lane, tracked],
   );
 
   /** Change summaries in the shape the commit controls speak. */
