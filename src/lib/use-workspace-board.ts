@@ -236,8 +236,12 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         });
         return current === null ? current : { ...current, [path]: content };
       });
-      void lane((ws) => ws.write(`/${path}`, content)).catch((cause: unknown) =>
-        restoreOnFailure(path, priorContent, priorChange)(cause),
+      return lane((ws) => ws.write(`/${path}`, content)).then(
+        () => true,
+        (cause: unknown) => {
+          restoreOnFailure(path, priorContent, priorChange)(cause);
+          return false;
+        },
       );
     },
     [lane, restoreOnFailure],

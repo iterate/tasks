@@ -251,10 +251,15 @@ function WorkspaceBoardPage() {
       claimedRef.current.set(target, Date.now());
       // Adding from a tag row: the task wears that tag from birth.
       const content = label === undefined ? file.content : setTaskCardLabels(file.content, [label]);
-      board.writeTask(target, content);
       renamedDraftRef.current = false;
       setDraftPath(target);
-      patchSearch({ task: target });
+      // The card shows instantly (optimistic), but the SHEET opens only once
+      // the create landed — the collab editor must never seed an empty doc
+      // and have the arriving template splice over early keystrokes (same
+      // rule as the rename lanes).
+      void board.writeTask(target, content).then((ok) => {
+        if (ok) patchSearch({ task: target });
+      });
     },
     [board, isTaken, patchSearch],
   );
