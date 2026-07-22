@@ -70,6 +70,91 @@ export interface TasksProject {
    * Synchronous on purpose so calls pipeline through it.
    */
   checkout(checkoutId: string, repoPath?: string): TasksCheckout;
+  /** PoC: the checkout AS a platform workspace — one capability carrying the
+   * collaborative session lane (open/push/wait, rebase model, no Yjs) and the
+   * board lane (files/status/commit/log; the overlay is the only diff). */
+  workspace(checkoutId: string, repoPath?: string): TasksWorkspace;
+}
+
+// The collab wire, shared verbatim by the vessel and the browser client —
+// mirrors the platform engine's contracts (collab-engine.ts).
+export type CollabOpened = { content: string; epoch: string; version: number };
+export type CollabAcceptResult =
+  | { status: "accepted"; version: number }
+  | { status: "epoch-mismatch"; epoch: string }
+  | { status: "history-miss" }
+  | { status: "too-large"; maxBytes: number };
+export type CollabWaitResult =
+  | { ops: { changes: unknown; clientId: string }[]; status: "ops" }
+  | { snapshot: { ackedSeq: number; content: string; epoch: string; version: number }; status: "snapshot" }
+  /** The session was durably ended (deleted/replaced/reset) — reopen to resume. */
+  | { status: "ended" };
+
+export type CollabChangeSegment =
+  | { clientId: string; createdAt?: number; from: number; kind: "inserted"; to: number }
+  | { at: number; clientId: string; createdAt?: number; kind: "deleted"; text: string };
+
+/** Two plain arrays on the wire (a union array breaks the platform's
+ * generated capnweb types); consumers re-interleave by position. */
+export type CollabChanges = {
+  baseContent: string;
+  baseVersion: number;
+  deleted: { at: number; clientId: string; createdAt?: number; text: string }[];
+  headVersion: number;
+  inserted: { clientId: string; createdAt?: number; from: number; to: number }[];
+};
+
+/** One event from the workspace's platform stream (the event-sourced spine). */
+export type WorkspaceStreamEvent = {
+  createdAt: string;
+  offset: number;
+  payload: unknown;
+  type: string;
+};
+
+export interface TasksWorkspace {
+  open(filePath: string): Promise<CollabOpened>;
+  /** The mount content at HEAD — what uncommitted work diffs against. */
+  readBase(filePath: string): Promise<string | null>;
+  /** Attributed tracked changes since the last commit (redline segments). */
+  changes(filePath: string): Promise<CollabChanges>;
+  push(input: {
+    baseVersion: number;
+    clientId: string;
+    epoch: string;
+    ops: { changes: unknown; clientSeq: number }[];
+    path: string;
+  }): Promise<CollabAcceptResult>;
+  /** Long-poll: ops after a version (parking ~20s), or a snapshot past the floor. */
+  wait(
+    filePath: string,
+    epoch: string,
+    afterVersion: number,
+    clientId?: string,
+  ): Promise<CollabWaitResult>;
+  /** Head versions of every live session — the board's change cursor. */
+  versions(): Promise<Record<string, number>>;
+  /** The newest page of the workspace's stream events (the audit spine). */
+  events(limit?: number): Promise<WorkspaceStreamEvent[]>;
+  /** Live push lane: replay after `afterOffset`, then new commits, delivered
+   * to the retained callback until the handle unsubscribes. */
+  subscribeEvents(
+    processEventBatch: (batch: { events: WorkspaceStreamEvent[] }) => unknown,
+    afterOffset?: number,
+  ): Promise<{ ping?(): Promise<boolean> | boolean; unsubscribe(): void }>;
+  /** Every task file in the merged view (board seed). */
+  files(): Promise<Record<string, string>>;
+  /** Filesystem trio with the platform gateway's semantics: live sessions
+   * route reads/writes; delete durably ends a session. */
+  read(path: string): Promise<string | null>;
+  write(path: string, content: string): Promise<void>;
+  delete(path: string): Promise<boolean>;
+  /** Back to the mount's version: restore a delete, drop an add, undo edits. */
+  revert(path: string): Promise<void>;
+  // Git passthroughs stay platform-shaped; the pinned client predates them.
+  status(): Promise<unknown>;
+  commit(message: string): Promise<unknown>;
+  log(limit?: number): Promise<unknown>;
 }
 
 export type CheckoutSnapshot = {

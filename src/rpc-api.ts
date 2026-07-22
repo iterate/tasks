@@ -6,11 +6,17 @@ import type { CommitResult, TaskChangeSummary } from "./state.ts";
 import type {
   CheckoutIndexEntry,
   CheckoutSnapshot,
+  CollabAcceptResult,
+  CollabChanges,
+  CollabOpened,
+  CollabWaitResult,
   ProjectCredential,
+  WorkspaceStreamEvent,
   TasksApi,
   TasksCheckout,
   TasksProject,
   TasksUser,
+  TasksWorkspace,
 } from "./lib/tasks-api.ts";
 import { DEFAULT_REPO_PATH, isCheckoutId, normalizeRepoPath } from "./lib/checkout-shared.ts";
 
@@ -146,6 +152,20 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
     return new TasksCheckoutApi(this.#env, this.#projectId, this.#credential, checkoutId, normalized);
   }
 
+  /**
+   * The checkout AS a platform workspace (PoC hop (a): browser → vessel
+   * `/api` → workspace DO). `/workspaces/tasks/<checkoutId>` mounts the
+   * checkout's repo at `/` and is created lazily on first use; one capability
+   * carries both the collab session lane and the board lane.
+   */
+  workspace(checkoutId: string, repoPath: string = DEFAULT_REPO_PATH): TasksWorkspaceApi {
+    const normalized = normalizeRepoPath(repoPath);
+    if (!isCheckoutId(checkoutId) || normalized === null) {
+      throw new Error("bad checkout id or repo path");
+    }
+    return new TasksWorkspaceApi(this.#dial, checkoutId, normalized);
+  }
+
   [Symbol.dispose](): void {
     this.#dial.close();
   }
@@ -237,6 +257,240 @@ export class TasksCheckoutApi extends RpcTarget implements TasksCheckout {
       });
     await this.#seeded;
     return stub;
+  }
+}
+
+/** The platform workspace surface this vessel forwards to. The pinned
+ * `iterate` client types predate it, so the shape is asserted locally —
+ * capnweb stubs are Proxies, so unknown properties resolve at runtime. */
+type WorkspaceStub = {
+  create(input: {
+    mounts?: Record<string, { policy: string; repoPath: string }>;
+  }): Promise<unknown>;
+  collab: {
+    open(path: string): Promise<CollabOpened>;
+    push(input: {
+      baseVersion: number;
+      clientId: string;
+      epoch: string;
+      ops: { changes: unknown; clientSeq: number }[];
+      path: string;
+    }): Promise<CollabAcceptResult>;
+    wait(
+      path: string,
+      epoch: string,
+      afterVersion: number,
+      clientId?: string,
+    ): Promise<CollabWaitResult>;
+    changes(path: string): Promise<CollabChanges>;
+    versions(): Promise<Record<string, number>>;
+  };
+  readBase(path: string): Promise<string | null>;
+  exists(path: string): Promise<boolean>;
+  glob(pattern: string): Promise<string[]>;
+  readFile(path: string): Promise<string | null>;
+  readFiles(paths: string[]): Promise<Record<string, string | null>>;
+  writeFile(path: string, content: string): Promise<void>;
+  deleteFile(path: string): Promise<boolean>;
+  revert(path: string): Promise<void>;
+  git: {
+    status(): Promise<unknown>;
+    commit(input: { message: string }): Promise<unknown>;
+    log(input?: { limit?: number }): Promise<unknown>;
+  };
+};
+
+/**
+ * The checkout AS a platform workspace, forwarded over the vessel's live
+ * dial. Stateless beyond the dial (versions/epochs live in the workspace DO),
+ * lazily created on first use, and carrying both lanes: the collaborative
+ * session wire and the board (files/status/commit — the overlay IS the diff,
+ * no base snapshot anywhere; live sessions settle inside the workspace's own
+ * barriers).
+ */
+export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
+  readonly #dial: ProjectDial;
+  readonly #checkoutId: string;
+  readonly #repoPath: string;
+  #created = false;
+
+  constructor(dial: ProjectDial, checkoutId: string, repoPath: string) {
+    super();
+    this.#dial = dial;
+    this.#checkoutId = checkoutId;
+    this.#repoPath = repoPath;
+  }
+
+  get #workspacePath(): string {
+    const repoSlug = this.#repoPath.replace(/^\/+/, "").replaceAll("/", "--");
+    return `/workspaces/tasks/${this.#checkoutId}~${repoSlug}`;
+  }
+
+  async #withWorkspace<T>(operation: (ws: WorkspaceStub) => Promise<T>): Promise<T> {
+    return this.#dial.withProject(async (project) => {
+      const workspaces = (
+        project as unknown as { workspaces: { get(path: string): WorkspaceStub } }
+      ).workspaces;
+      // The workspace identity ENCODES the repo: the same checkout id against
+      // a different repository is a different workspace — it can never
+      // silently bind to (and edit) the first repository's workspace.
+      const ws = workspaces.get(this.#workspacePath);
+      try {
+        return await operation(ws);
+      } catch (error) {
+        // Only the workspace-missing error (exact platform phrasing) triggers
+        // lazy creation — a file-level "does not exist" must surface as-is.
+        if (this.#created || !/workspace "[^"]+" does not exist/.test(errorText(error))) {
+          throw error;
+        }
+        // Concurrent first-touchers may race create: tolerate its failure and
+        // retry the operation regardless — ITS error is the one that matters.
+        await ws
+          .create({ mounts: { "/": { policy: "commit-to-main", repoPath: this.#repoPath } } })
+          .catch(() => undefined);
+        // Proven by USE: only a successful retry marks the workspace created —
+        // a transient create failure must not wedge this held capability.
+        const result = await operation(ws);
+        this.#created = true;
+        return result;
+      }
+    });
+  }
+
+  open(filePath: string): Promise<CollabOpened> {
+    return this.#withWorkspace((ws) => ws.collab.open(filePath));
+  }
+
+  readBase(filePath: string): Promise<string | null> {
+    return this.#withWorkspace((ws) => ws.readBase(filePath));
+  }
+
+  changes(filePath: string): Promise<CollabChanges> {
+    return this.#withWorkspace((ws) => ws.collab.changes(filePath));
+  }
+
+  push(input: {
+    baseVersion: number;
+    clientId: string;
+    epoch: string;
+    ops: { changes: unknown; clientSeq: number }[];
+    path: string;
+  }): Promise<CollabAcceptResult> {
+    return this.#withWorkspace((ws) => ws.collab.push(input));
+  }
+
+  wait(
+    filePath: string,
+    epoch: string,
+    afterVersion: number,
+    clientId?: string,
+  ): Promise<CollabWaitResult> {
+    return this.#withWorkspace((ws) => ws.collab.wait(filePath, epoch, afterVersion, clientId));
+  }
+
+  versions(): Promise<Record<string, number>> {
+    return this.#withWorkspace((ws) => ws.collab.versions());
+  }
+
+  /** The newest page of the workspace's stream events, newest first. */
+  async events(limit = 50): Promise<WorkspaceStreamEvent[]> {
+    // A REAL workspace call: on a fresh checkout it throws the
+    // missing-workspace error, which is what makes #withWorkspace lazily
+    // create it — so the stream (and its birth events) exist to read.
+    await this.#withWorkspace((ws) => ws.exists("/"));
+    const events = (await this.#dial.withProject(async (project) => {
+      const streams = (
+        project as unknown as {
+          streams: { get(path: string): { getEvents(args: object): Promise<unknown[]> } };
+        }
+      ).streams;
+      return streams.get(this.#workspacePath).getEvents({ includeEphemeral: true });
+    })) as { createdAt?: string; offset: number; payload?: unknown; type: string }[];
+    return events
+      .slice(-limit)
+      .reverse()
+      .map((event) => ({
+        createdAt: event.createdAt ?? "",
+        offset: event.offset,
+        payload: event.payload ?? null,
+        type: event.type,
+      }));
+  }
+
+  /**
+   * Live event feed: durable history after `afterOffset`, then every new
+   * commit, PUSHED over the retained callback — the platform's ephemeral
+   * subscription lane composed end-to-end (browser stub → vessel → stream
+   * DO). Returns the platform's subscription handle (unsubscribe()-able).
+   */
+  async subscribeEvents(
+    processEventBatch: (batch: { events: WorkspaceStreamEvent[] }) => unknown,
+    afterOffset = 0,
+  ): Promise<{ ping?(): Promise<boolean> | boolean; unsubscribe(): void }> {
+    // A real call (see events()) so lazy creation actually runs.
+    await this.#withWorkspace((ws) => ws.exists("/"));
+    return this.#dial.withProject(async (project) => {
+      const streams = (
+        project as unknown as {
+          streams: { get(path: string): { subscribe(args: object): Promise<unknown> } };
+        }
+      ).streams;
+      return (await streams.get(this.#workspacePath).subscribe({
+        processEventBatch,
+        replayAfterOffset: afterOffset,
+      })) as { ping?(): Promise<boolean> | boolean; unsubscribe(): void };
+    });
+  }
+
+  /** Every task file in the merged view, path → content (board seed).
+   * PoC shape: fine for boards of hundreds; the real fix for gigantic repos
+   * is a platform-side filtered snapshot (the workspace equivalent of the
+   * repo DO's listTaskFiles, which exists precisely because glob+read-each
+   * overloads the DO). */
+  async files(): Promise<Record<string, string>> {
+    return this.#withWorkspace(async (ws) => {
+      const paths = await ws.glob("**/tasks/**/*.md");
+      // ONE batched platform call for the whole set — per-file reads through
+      // this chain collapse at thousands of tasks.
+      const contents = await ws.readFiles(paths);
+      // Keys leave here repo-relative (no leading slash) — one shape for
+      // every consumer; reads/writes prepend the platform slash themselves.
+      // Null reads (vanished between glob and read, transient failure) are
+      // SKIPPED, never seeded as phantom empty cards.
+      return Object.fromEntries(
+        Object.entries(contents).flatMap(([path, content]) =>
+          content === null ? [] : [[path.replace(/^\/+/, ""), content]],
+        ),
+      );
+    });
+  }
+
+  read(path: string): Promise<string | null> {
+    return this.#withWorkspace((ws) => ws.readFile(path));
+  }
+
+  write(path: string, content: string): Promise<void> {
+    return this.#withWorkspace((ws) => ws.writeFile(path, content));
+  }
+
+  delete(path: string): Promise<boolean> {
+    return this.#withWorkspace((ws) => ws.deleteFile(path));
+  }
+
+  revert(path: string): Promise<void> {
+    return this.#withWorkspace((ws) => ws.revert(path));
+  }
+
+  status(): Promise<unknown> {
+    return this.#withWorkspace((ws) => ws.git.status());
+  }
+
+  commit(message: string): Promise<unknown> {
+    return this.#withWorkspace((ws) => ws.git.commit({ message }));
+  }
+
+  log(limit = 5): Promise<unknown> {
+    return this.#withWorkspace((ws) => ws.git.log({ limit }));
   }
 }
 

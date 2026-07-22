@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Y from "yjs";
 import type YProvider from "y-partyserver/provider";
@@ -66,6 +66,23 @@ import { Skeleton } from "../ui/skeleton.tsx";
 type CheckoutSearch = { repoPath?: string; task?: string; q?: string; group?: "none" | "tags" };
 
 export const Route = createFileRoute("/c/$checkoutId")({
+  beforeLoad: ({ params, search }) => {
+    // The workspace board (/w) is the product; the Yjs lane stays reachable
+    // only with ?legacy=1 for comparison until it is deleted.
+    if ((search as { legacy?: string }).legacy !== "1") {
+      const legacy = search as { group?: string; q?: string; repoPath?: string; task?: string };
+      throw redirect({
+        params,
+        search: {
+          group: legacy.group === "tags" ? ("label" as const) : ("folder" as const),
+          q: legacy.q ?? "",
+          repo: legacy.repoPath ?? "/repos/config",
+          task: legacy.task ?? "",
+        },
+        to: "/w/$checkoutId",
+      });
+    }
+  },
   validateSearch: (search: Record<string, unknown>): CheckoutSearch => {
     const repoPath = normalizeRepoPath(
       typeof search.repoPath === "string" ? search.repoPath : null,
@@ -373,7 +390,7 @@ function ReadyCheckout({
     });
     if (openPath === task.path) setOpenPath(nextPath);
   };
-  const addTask = (state: string, folder: string | null) => {
+  const addTask = (state: string, folder: string | null, label?: string) => {
     const reserved = new Set([...Object.keys(files), ...Object.keys(base)]);
     let file = newTaskFile({
       title: "New task",
@@ -384,7 +401,10 @@ function ReadyCheckout({
       file = { ...file, path: taskPathForTitle("New task", `${suffix}`) };
     }
     const path = inFolder(file.path, folder);
-    filesMap.set(path, new Y.Text(file.content));
+    // Adding from a tag row: the task wears that tag from birth (parity
+    // with the workspace board).
+    const content = label === undefined ? file.content : setTaskCardLabels(file.content, [label]);
+    filesMap.set(path, new Y.Text(content));
     renamedDraftRef.current = false;
     setDraftPath(path);
     setOpenPath(path);

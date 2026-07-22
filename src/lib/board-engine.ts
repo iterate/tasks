@@ -72,13 +72,9 @@ function rowGroups(
       group.push(task);
       groups.set(task.folder, group);
     }
-    if (groups.size === 0) groups.set("/", []);
+    if (groups.size === 0) groups.set("tasks", []);
     return [...groups]
-      .sort(([left], [right]) => {
-        if (left === "/") return -1;
-        if (right === "/") return 1;
-        return left.localeCompare(right);
-      })
+      .sort(([left], [right]) => left.localeCompare(right))
       .map(([folder, grouped]) => ({
         key: `folder:${folder}`,
         label: folder,

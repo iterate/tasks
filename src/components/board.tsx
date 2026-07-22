@@ -1,5 +1,5 @@
 import { DragDropProvider, useDraggable, useDroppable } from "@dnd-kit/react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   CircleCheckIcon,
   CircleDashedIcon,
@@ -15,7 +15,7 @@ import { Button } from "../ui/button.tsx";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip.tsx";
 import type { TaskChangeStatus } from "../state.ts";
 import { taskColumnState } from "../tasks-model.ts";
-import { stateLabel, type BoardTask, type PresenceUser } from "../lib/board-model.ts";
+import { stateLabel, type BoardTask, type PresenceUser, type RowField } from "../lib/board-model.ts";
 import type { BoardProjection } from "../lib/board-engine.ts";
 import { agoText, type RecentTouch } from "../lib/recency.ts";
 
@@ -39,7 +39,7 @@ export function Board({
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
   onMove: (task: BoardTask, state: string, folder: string, labels?: string[]) => void;
-  onAdd: (state: string, folder: string | null) => void;
+  onAdd: (state: string, folder: string | null, label?: string) => void;
   onOpen: (path: string) => void;
 }) {
   const { rowField, rows, columns, filterActive } = projection;
@@ -99,9 +99,18 @@ export function Board({
                 >
                   <TaskStateIcon state={column.state} />
                   <h2 className="truncate text-sm font-medium">{stateLabel(column.state)}</h2>
-                  <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+                  <span className="text-xs tabular-nums text-muted-foreground">
                     {filterActive ? `${column.visible}/${column.total}` : column.total}
                   </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 w-7 px-0 text-muted-foreground/60 hover:text-foreground"
+                    aria-label={`Add task to ${stateLabel(column.state)}`}
+                    onClick={() => onAdd(column.state, null)}
+                  >
+                    <PlusIcon aria-hidden className="size-4" />
+                  </Button>
                 </div>
               ))}
             </div>
@@ -114,7 +123,8 @@ export function Board({
                 // group hands the slot to the next bar — pure CSS.
                 <header className="sticky top-10 z-10 min-w-full border-y border-border/40 bg-muted">
                   <div className="mx-auto min-w-0" style={{ width: contentWidth }}>
-                    <div className="sticky left-0 flex h-9 w-fit max-w-[100vw] items-center gap-2 px-3 text-sm font-medium">
+                    {/* Columns sit inside px-2 + per-column px-3 (20px = pl-5): the row icon left edge aligns with the column icon. */}
+                    <div className="sticky left-0 flex h-9 w-fit max-w-[100vw] items-center gap-2 pr-3 pl-5 text-sm font-medium">
                     {rowField === "folder" ? (
                       <FolderIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                     ) : (
@@ -134,6 +144,7 @@ export function Board({
                 {row.cells.map((cell) => (
                   <BoardCell
                     key={cell.state}
+                    rowField={rowField}
                     state={cell.state}
                     rowKey={row.key}
                     rowValue={row.value}
@@ -156,7 +167,11 @@ export function Board({
   );
 }
 
+/** Cards mounted per cell before "show more" paging kicks in. */
+const CELL_PAGE = 60;
+
 function BoardCell({
+  rowField,
   state,
   rowKey,
   rowValue,
@@ -169,6 +184,7 @@ function BoardCell({
   onAdd,
   onOpen,
 }: {
+  rowField: RowField;
   state: string;
   rowKey: string;
   rowValue: string | null;
@@ -178,13 +194,17 @@ function BoardCell({
   taskChangeByPath: Map<string, TaskChangeStatus>;
   presenceByPath: Map<string, PresenceUser[]>;
   recentByPath: Map<string, RecentTouch>;
-  onAdd: (state: string, folder: string | null) => void;
+  onAdd: (state: string, folder: string | null, label?: string) => void;
   onOpen: (path: string) => void;
 }) {
   const { ref, isDropTarget } = useDroppable({
     id: `cell:${encodeURIComponent(rowKey)}:${encodeURIComponent(state)}`,
     accept: "task",
   });
+  // DOM stays bounded no matter how big the board gets: cells render a page
+  // of cards and grow on demand. 4k mounted cards froze drag outright.
+  const [limit, setLimit] = useState(CELL_PAGE);
+  const visible = tasks.length > limit ? tasks.slice(0, limit) : tasks;
   return (
     <section
       ref={ref}
@@ -195,7 +215,7 @@ function BoardCell({
     >
       <div className="flex min-h-0 flex-1 flex-col px-1 pb-1">
         <div className="flex flex-col gap-2">
-          {tasks.map((task) => (
+          {visible.map((task) => (
             <BoardCard
               key={task.path}
               task={task}
@@ -208,15 +228,34 @@ function BoardCell({
               onOpen={onOpen}
             />
           ))}
+          {tasks.length > limit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-full justify-center text-xs text-muted-foreground"
+              onClick={() => setLimit((current) => current + CELL_PAGE)}
+            >
+              Show {Math.min(CELL_PAGE, tasks.length - limit)} more ({tasks.length - limit} hidden)
+            </Button>
+          )}
         </div>
         <Button
           variant="ghost"
           size="sm"
-          className="mt-1 h-8 w-full justify-center text-xs text-muted-foreground opacity-0 transition-opacity group-hover/cell:opacity-100 focus-visible:opacity-100"
-          onClick={() => onAdd(state, rowValue)}
+          aria-label="New task"
+          className="mt-1 h-8 w-full justify-center text-muted-foreground/60 opacity-0 transition-opacity group-hover/cell:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+          onClick={() =>
+            // A row value is a FOLDER only under folder grouping; under label
+            // grouping it's a tag — the new task goes to the default folder
+            // and wears the row's tag instead.
+            onAdd(
+              state,
+              rowField === "folder" ? rowValue : null,
+              rowField === "label" ? (rowValue ?? undefined) : undefined,
+            )
+          }
         >
-          <PlusIcon aria-hidden className="size-3.5" />
-          New task
+          <PlusIcon aria-hidden className="size-4" />
         </Button>
       </div>
     </section>
@@ -291,9 +330,9 @@ function BoardCard({
           {task.summary}
         </p>
       )}
-      {(showTags && task.labels.length > 0) || (showFolder && task.folder !== "/") ? (
+      {(showTags && task.labels.length > 0) || (showFolder && task.folder !== "tasks") ? (
         <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
-          {showFolder && task.folder !== "/" ? (
+          {showFolder && task.folder !== "tasks" ? (
             <Badge variant="outline" className="gap-1 font-mono">
               <FolderIcon aria-hidden className="size-3" />
               {task.folder}

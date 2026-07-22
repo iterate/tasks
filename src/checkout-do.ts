@@ -100,11 +100,42 @@ export class TasksCheckoutDurableObject extends YServer {
     );
   }
 
-  /** listTaskFiles both proves the token works and provides the seed. */
+  /** The seed read both proves the token works and provides the board.
+   * (The platform's listTaskFiles was ripped out of the OS repos API by
+   * iterate#2222; the legacy lane now composes it from listFiles + capped
+   * readFile — acceptable here, this lane retires with the workspace board.) */
   async #verifyAndSeed(dial: ProjectDial, repoPath: string): Promise<void> {
-    const listing = (await dial.withProject((project) =>
-      project.repos.get(repoPath).listTaskFiles(),
-    )) as { commitOid: string; files: Record<string, string> };
+    const listing = await dial.withProject(async (project) => {
+      const repo = project.repos.get(repoPath);
+      const { commitOid, paths } = (await repo.listFiles()) as {
+        commitOid: string;
+        paths: string[];
+      };
+      // Keys are REPO-RELATIVE (no leading slash) — the doc's key shape
+      // everywhere else; reads keep the listing's original path.
+      const taskPaths = paths
+        .map((path) => ({ key: path.replace(/^\/+/, ""), path }))
+        .filter((entry) => isTaskFilePath(entry.key));
+      const files: Record<string, string> = {};
+      const lane = 16;
+      for (let start = 0; start < taskPaths.length; start += lane) {
+        await Promise.all(
+          taskPaths.slice(start, start + lane).map(async (entry) => {
+            // Tolerate per-file failures (deleted between list and read,
+            // transient RPC): one bad file must not block the whole seed.
+            try {
+              const file = (await repo.readFile({ commitOid, path: entry.path })) as {
+                content: string;
+              } | null;
+              if (file !== null) files[entry.key] = file.content;
+            } catch {
+              // skipped — the poll/commit lanes reconcile it later
+            }
+          }),
+        );
+      }
+      return { commitOid, files };
+    });
     // Re-check after the await: a racing join may have seeded already.
     if (checkoutBaseCommit(this.document) !== undefined) return;
     this.document.transact(() => {

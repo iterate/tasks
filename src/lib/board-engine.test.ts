@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toBoardTask } from "./board-model.ts";
+import { changeAfterDelete, changeAfterWrite, toBoardTask, unclaimedPath } from "./board-model.ts";
 import { matchesFilter, projectBoard } from "./board-engine.ts";
 import { setTaskCardLabels } from "../tasks-model.ts";
 
@@ -26,7 +26,7 @@ describe("projectBoard", () => {
     make("tasks/a.md", "state: todo\ntags:\n  - alpha\n  - beta", "# Alpha beta task"),
     make("tasks/b.md", "state: done\ntags:\n  - alpha", "# Alpha task"),
     make("tasks/c.md", "state: todo", "# Untagged"),
-    make("tasks/sub/d.md", "state: todo", "# Nested"),
+    make("sub/tasks/d.md", "state: todo", "# Nested"),
   ];
 
   it("duplicates multi-tag cards across their tag rows; untagged trail in No tag", () => {
@@ -54,7 +54,7 @@ describe("projectBoard", () => {
 
   it("groups by folder with the root row first", () => {
     const projection = projectBoard({ tasks, filter: "", rowField: "folder" });
-    expect(projection.rows.map((row) => row.label)).toEqual(["/", "/sub"]);
+    expect(projection.rows.map((row) => row.label)).toEqual(["sub/tasks", "tasks"]);
   });
 
   it("renders one flat row without grouping", () => {
@@ -89,3 +89,40 @@ describe("frontmatter resilience", () => {
     expect(task.title).toBe("tasks/sub/quiet.md");
   });
 });
+
+describe("optimistic change transitions", () => {
+  it("first write of an unknown path is an ADD, not modified", () => {
+    expect(changeAfterWrite(undefined, false)).toBe("added");
+  });
+  it("first write of a known (seeded) path is a modification", () => {
+    expect(changeAfterWrite(undefined, true)).toBe("modified");
+  });
+  it("a later write keeps the existing status — except deleted, which revives as modified", () => {
+    expect(changeAfterWrite("added", true)).toBe("added");
+    expect(changeAfterWrite("modified", true)).toBe("modified");
+    expect(changeAfterWrite("deleted", true)).toBe("modified");
+    expect(changeAfterWrite("deleted", false)).toBe("modified");
+  });
+  it("deleting an uncommitted add clears the change; others become deleted", () => {
+    expect(changeAfterDelete("added")).toBeNull();
+    expect(changeAfterDelete("modified")).toBe("deleted");
+    expect(changeAfterDelete(undefined)).toBe("deleted");
+  });
+});
+
+describe("unclaimedPath", () => {
+  it("returns the desired path when free", () => {
+    expect(unclaimedPath("tasks/new-task.md", () => false)).toBe("tasks/new-task.md");
+  });
+  it("suffixes the filename until free — tasks never collapse onto one file", () => {
+    const taken = new Set(["tasks/new-task.md", "tasks/new-task-2.md"]);
+    expect(unclaimedPath("tasks/new-task.md", (path) => taken.has(path))).toBe(
+      "tasks/new-task-3.md",
+    );
+  });
+  it("keeps the folder prefix intact", () => {
+    const taken = new Set(["sub/tasks/x.md"]);
+    expect(unclaimedPath("sub/tasks/x.md", (path) => taken.has(path))).toBe("sub/tasks/x-2.md");
+  });
+});
+
