@@ -19,7 +19,8 @@ export function StreamEventsSheet({
   streamPath: string;
   subscribe: (
     onBatch: (events: WorkspaceStreamEvent[]) => void,
-  ) => Promise<{ unsubscribe(): void }>;
+    afterOffset?: number,
+  ) => Promise<{ ping?(): Promise<boolean> | boolean; unsubscribe(): void }>;
   onClose: () => void;
 }) {
   const [events, setEvents] = useState<WorkspaceStreamEvent[]>([]);
@@ -27,31 +28,66 @@ export function StreamEventsSheet({
   const scroller = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
 
+  const lastOffset = useRef(-1);
   useEffect(() => {
     if (!open) return;
     setEvents([]);
     setStatus("connecting");
-    let handle: { unsubscribe(): void } | null = null;
+    lastOffset.current = -1;
+    let handle: { ping?(): Promise<boolean> | boolean; unsubscribe(): void } | null = null;
     let cancelled = false;
-    subscribe((batch) => {
+
+    const onBatch = (batch: WorkspaceStreamEvent[]) => {
       if (cancelled) return;
       setStatus("live");
       setEvents((current) => {
         // Replays and reconnects may overlap — the offset is the identity.
         const byOffset = new Map(current.map((event) => [event.offset, event]));
         for (const event of batch) byOffset.set(event.offset, event);
-        return [...byOffset.values()].sort((a, b) => a.offset - b.offset);
+        const merged = [...byOffset.values()].sort((a, b) => a.offset - b.offset);
+        lastOffset.current = merged.at(-1)?.offset ?? lastOffset.current;
+        return merged;
       });
-    }).then(
-      (opened) => {
-        if (cancelled) opened.unsubscribe();
-        else handle = opened;
-      },
-      (cause: unknown) =>
-        setStatus(cause instanceof Error ? cause.message : String(cause)),
-    );
+    };
+
+    const connect = (afterOffset: number) => {
+      subscribe(onBatch, Math.max(0, afterOffset)).then(
+        (opened) => {
+          if (cancelled) opened.unsubscribe();
+          else handle = opened;
+        },
+        (cause: unknown) => {
+          if (!cancelled) setStatus(cause instanceof Error ? cause.message : String(cause));
+        },
+      );
+    };
+    connect(0);
+
+    // The subscription rides the capnweb WS — a redial (any RPC failure
+    // elsewhere disposes the session) silently drops it. Heartbeat the
+    // handle and resubscribe from the last seen offset when it dies.
+    const heartbeat = setInterval(() => {
+      void (async () => {
+        if (cancelled || handle === null) return;
+        try {
+          if ((await handle.ping?.()) === false) throw new Error("subscription lapsed");
+        } catch {
+          if (cancelled) return;
+          setStatus("reconnecting…");
+          try {
+            handle.unsubscribe();
+          } catch {
+            // the dead session is already gone
+          }
+          handle = null;
+          connect(lastOffset.current);
+        }
+      })();
+    }, 10_000);
+
     return () => {
       cancelled = true;
+      clearInterval(heartbeat);
       try {
         handle?.unsubscribe();
       } catch {

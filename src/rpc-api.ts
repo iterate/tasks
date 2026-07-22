@@ -426,7 +426,7 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
   async subscribeEvents(
     processEventBatch: (batch: { events: WorkspaceStreamEvent[] }) => unknown,
     afterOffset = 0,
-  ): Promise<{ unsubscribe(): void }> {
+  ): Promise<{ ping?(): Promise<boolean> | boolean; unsubscribe(): void }> {
     // A real call (see events()) so lazy creation actually runs.
     await this.#withWorkspace((ws) => ws.exists("/"));
     return this.#dial.withProject(async (project) => {
@@ -438,7 +438,7 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       return (await streams.get(this.#workspacePath).subscribe({
         processEventBatch,
         replayAfterOffset: afterOffset,
-      })) as { unsubscribe(): void };
+      })) as { ping?(): Promise<boolean> | boolean; unsubscribe(): void };
     });
   }
 

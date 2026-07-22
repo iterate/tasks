@@ -382,8 +382,8 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   );
 
   const subscribeEvents = useCallback(
-    (onBatch: (events: WorkspaceStreamEvent[]) => void) =>
-      lane((ws) => ws.subscribeEvents((batch) => onBatch(batch.events))),
+    (onBatch: (events: WorkspaceStreamEvent[]) => void, afterOffset?: number) =>
+      lane((ws) => ws.subscribeEvents((batch) => onBatch(batch.events), afterOffset)),
     [lane],
   );
 

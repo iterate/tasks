@@ -141,7 +141,7 @@ export interface TasksWorkspace {
   subscribeEvents(
     processEventBatch: (batch: { events: WorkspaceStreamEvent[] }) => unknown,
     afterOffset?: number,
-  ): Promise<{ unsubscribe(): void }>;
+  ): Promise<{ ping?(): Promise<boolean> | boolean; unsubscribe(): void }>;
   /** Every task file in the merged view (board seed). */
   files(): Promise<Record<string, string>>;
   /** Filesystem trio with the platform gateway's semantics: live sessions
