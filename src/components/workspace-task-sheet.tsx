@@ -62,8 +62,8 @@ export function WorkspaceTaskSheet({
   columns: string[];
   allTags: string[];
   changeStatus: TaskChangeStatus | undefined;
-  /** Rename the task file; returns an error message or null on success. */
-  onRename: (nextPath: string) => string | null;
+  /** Rename the task file; resolves an error message or null on success. */
+  onRename: (nextPath: string) => Promise<string | null>;
   focusHeadline?: "select" | "end";
   /** Bumped when the session was ended server-side (revert) — remounts the
    * editor so it reseeds instead of showing the dead session's text. */
@@ -130,8 +130,8 @@ function SheetBody({
   columns: string[];
   allTags: string[];
   changeStatus: TaskChangeStatus | undefined;
-  /** Rename the task file; returns an error message or null on success. */
-  onRename: (nextPath: string) => string | null;
+  /** Rename the task file; resolves an error message or null on success. */
+  onRename: (nextPath: string) => Promise<string | null>;
   focusHeadline?: "select" | "end";
   /** Bumped when the session was ended server-side (revert) — remounts the
    * editor so it reseeds instead of showing the dead session's text. */
@@ -153,7 +153,8 @@ function SheetBody({
       setPathError(null);
       return;
     }
-    setPathError(onRename(pathDraft));
+    // The REAL outcome: async failures (a failed create) surface here too.
+    void onRename(pathDraft).then(setPathError);
   };
 
   return (

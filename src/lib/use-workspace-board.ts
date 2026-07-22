@@ -201,21 +201,41 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   const deleteTask = useCallback(
     (path: string) => {
       mutationEpoch.current++;
+      let priorContent: string | undefined;
+      let priorChange: TaskChangeStatus | undefined;
       setFiles((current) => {
         if (current === null) return current;
+        priorContent = current[path];
         const { [path]: _gone, ...rest } = current;
         return rest;
       });
       // Deleted cards belong on the Deleted strip immediately — and deleting
       // an uncommitted add erases the change instead of leaving a phantom.
       setChanges((current) => {
+        priorChange = current.get(path);
         const next = new Map(current);
         const transitioned = changeAfterDelete(current.get(path));
         if (transitioned === null) next.delete(path);
         else next.set(path, transitioned);
         return next;
       });
-      void lane((ws) => ws.delete(`/${path}`)).catch(() => {});
+      void lane((ws) => ws.delete(`/${path}`)).catch((cause: unknown) => {
+        // The workspace still has the file — put the card (and its badge)
+        // back instead of pretending the delete happened.
+        mutationEpoch.current++;
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setFiles((current) =>
+          current === null || priorContent === undefined
+            ? current
+            : { ...current, [path]: priorContent },
+        );
+        setChanges((current) => {
+          const next = new Map(current);
+          if (priorChange === undefined) next.delete(path);
+          else next.set(path, priorChange);
+          return next;
+        });
+      });
     },
     [lane],
   );
@@ -259,12 +279,13 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       carry: (finalSource: string) => string = (source) => source,
       /** Runs once the write RPC landed — the moment navigation is safe. */
       onWritten?: () => void,
-    ): Promise<boolean> => {
+    ): Promise<string | null> => {
       try {
         await lane((ws) => ws.write(`/${toPath}`, content));
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-        return false;
+        const message = cause instanceof Error ? cause.message : String(cause);
+        setError(message);
+        return message;
       }
       mutationEpoch.current++;
       setChanges((current) => {
@@ -297,7 +318,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
         // The carry is best-effort; the source still gets deleted below.
       }
       void lane((ws) => ws.delete(`/${fromPath}`)).catch(() => {});
-      return true;
+      return null;
     },
     [lane],
   );
@@ -323,7 +344,7 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
    * route remounts open editors AFTER this (the platform ended the file's
    * session; an early remount would attach to the dying one). */
   const revertTask = useCallback(
-    (path: string): Promise<void> => {
+    (path: string): Promise<boolean> => {
       mutationEpoch.current++;
       return lane(async (ws) => {
         await ws.revert(`/${path}`);
@@ -341,16 +362,22 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
           next.delete(path);
           return next;
         });
-      }).catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : String(cause)),
-      );
+        return true;
+      }).catch((cause: unknown) => {
+        // Failure must be VISIBLE to callers: a remount on a failed revert
+        // would reseat the editor against a session that never ended.
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return false;
+      });
     },
     [lane],
   );
 
+  /** True only when EVERY revert landed. */
   const discardAll = useCallback(
-    async (): Promise<void> => {
-      await Promise.all([...changes.keys()].map((path) => revertTask(path)));
+    async (): Promise<boolean> => {
+      const results = await Promise.all([...changes.keys()].map((path) => revertTask(path)));
+      return results.every(Boolean);
     },
     [changes, revertTask],
   );

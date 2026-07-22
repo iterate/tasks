@@ -293,7 +293,7 @@ function WorkspaceBoardPage() {
   // The sheet's path field: any rename the board can represent is allowed —
   // the file must stay a task (.md under a folder named "tasks").
   const renameTask = useCallback(
-    (task: BoardTask, nextPathRaw: string): string | null => {
+    async (task: BoardTask, nextPathRaw: string): Promise<string | null> => {
       const nextPath = nextPathRaw.split("/").filter(Boolean).join("/");
       if (nextPath === "") return "Path cannot be empty.";
       if (!isTaskFilePath(nextPath))
@@ -303,15 +303,16 @@ function WorkspaceBoardPage() {
       if (renamingRef.current) return "A rename is already in progress — retry in a moment.";
       const wasOpen = search.task === task.path;
       renamingRef.current = true;
-      void board
-        .renameTask(task.path, nextPath, sourceOf(task), (final) => final, () => {
+      try {
+        // The input's error line reports the REAL outcome — a failed create
+        // must not read as accepted.
+        return await board.renameTask(task.path, nextPath, sourceOf(task), (final) => final, () => {
           setDraftPath((current) => (current === task.path ? nextPath : current));
           if (wasOpen) patchSearch({ task: nextPath });
-        })
-        .finally(() => {
-          renamingRef.current = false;
         });
-      return null;
+      } finally {
+        renamingRef.current = false;
+      }
     },
     [board, patchSearch, search.task, sourceOf],
   );
@@ -372,8 +373,8 @@ function WorkspaceBoardPage() {
             onDiscardAll={() => {
               // Discard ends every changed file's session — reseat the open
               // editor afterwards exactly like a single revert does.
-              void board.discardAll().then(() => {
-                if (search.task !== "") setEditorEpoch((current) => current + 1);
+              void board.discardAll().then((ok) => {
+                if (ok && search.task !== "") setEditorEpoch((current) => current + 1);
               });
             }}
           />
@@ -425,7 +426,9 @@ function WorkspaceBoardPage() {
           if (!applyLive(openTask.path, (current) => setTaskCardLabels(current, labels)))
             board.writeTask(openTask.path, setTaskCardLabels(sourceOf(openTask), labels));
         }}
-        onRename={(nextPath) => (openTask === null ? null : renameTask(openTask, nextPath))}
+        onRename={(nextPath) =>
+          openTask === null ? Promise.resolve(null) : renameTask(openTask, nextPath)
+        }
         editorEpoch={editorEpoch}
         editorApiRef={editorApiRef}
         focusHeadline={
@@ -439,8 +442,8 @@ function WorkspaceBoardPage() {
           if (openTask === null) return;
           // Remount only AFTER the revert RPC ended the old session — an
           // early remount would attach to the dying session and see it end.
-          void board.revertTask(openTask.path).then(() => {
-            setEditorEpoch((current) => current + 1);
+          void board.revertTask(openTask.path).then((ok) => {
+            if (ok) setEditorEpoch((current) => current + 1);
           });
         }}
         onDelete={() => {
