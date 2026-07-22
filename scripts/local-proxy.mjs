@@ -20,8 +20,13 @@ const targetPort = Number(target.port || (secure ? 443 : 80));
 
 const stamp = (headers) => {
   const out = { ...headers, host: target.host, "x-itx-project-id": projectId };
-  const cookies = [headers.cookie, `iterate-project-auth=${token}`].filter(Boolean);
-  out.cookie = cookies.join("; ");
+  // Strip any inbound iterate-project-auth (a stale browser cookie would
+  // win first-match on the server) — the fresh mint is the only one sent.
+  const inbound = (headers.cookie ?? "")
+    .split(";")
+    .map((pair) => pair.trim())
+    .filter((pair) => pair !== "" && !pair.startsWith("iterate-project-auth="));
+  out.cookie = [...inbound, `iterate-project-auth=${token}`].join("; ");
   return out;
 };
 

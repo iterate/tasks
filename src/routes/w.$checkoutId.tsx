@@ -192,7 +192,13 @@ function WorkspaceBoardPage() {
       setCommitError(null);
       setCommitPending(true);
       try {
-        return await board.commit(message?.trim() || fallbackCommitMessage(board.taskChanges));
+        const result = await board.commit(
+          message?.trim() || fallbackCommitMessage(board.taskChanges),
+        );
+        // The redline baseline advanced: reseat an open editor so committed
+        // work stops wearing marks (same lever revert/discard use).
+        if (searchTaskRef.current !== "") setEditorEpoch((current) => current + 1);
+        return result;
       } catch (cause) {
         setCommitError(cause instanceof Error ? cause.message : String(cause));
         throw cause;
