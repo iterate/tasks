@@ -6,10 +6,10 @@ import { Board } from "../components/board.tsx";
 import {
   CheckoutBreadcrumbs,
   FilterControl,
-  GroupControl,
   MobileOverflow,
   ShareButton,
 } from "../components/checkout-header.tsx";
+import { BoardSettings } from "../components/board-settings.tsx";
 import { ActivityIcon } from "lucide-react";
 import { Button } from "../ui/button.tsx";
 import { CommitControls, DeletedTasksStrip } from "../components/commit-controls.tsx";
@@ -68,6 +68,8 @@ function WorkspaceBoardPage() {
   // Bumped on revert: the platform ends the file's session, so the open
   // editor must remount and reseed from the reverted content.
   const [editorEpoch, setEditorEpoch] = useState(0);
+  // Track changes (redlines) is a board-level setting, default on.
+  const [trackChanges, setTrackChanges] = useState(true);
   // A just-created task: the editor opens with the headline selected and the
   // filename trails the title until the first commit (same UX as the Yjs
   // board).
@@ -235,6 +237,29 @@ function WorkspaceBoardPage() {
     [board, claimPath, mutateTask, patchSearch, search.task, sourceOf],
   );
 
+  const addTaskRef = useRef<((state: string, folder: string | null) => void) | null>(null);
+  const columnsRef = useRef<string[]>([]);
+  // Keyboard: c creates a task in the first column (ignored while typing).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "c" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target !== null &&
+        (target.isContentEditable ||
+          ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
+          target.closest(".cm-editor") !== null)
+      ) {
+        return;
+      }
+      if (search.task !== "") return;
+      event.preventDefault();
+      addTaskRef.current?.(columnsRef.current[0] ?? "todo", null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [search.task]);
+
   const addTask = useCallback(
     (state: string, folder: string | null, label?: string) => {
       // Rapid adds must not collapse: number the TITLE (New task 2, …) so
@@ -263,6 +288,11 @@ function WorkspaceBoardPage() {
     },
     [board, isTaken, patchSearch],
   );
+
+  useEffect(() => {
+    addTaskRef.current = addTask;
+    columnsRef.current = columns;
+  });
 
   // While the draft's sheet is open and it is still an uncommitted add, its
   // filename trails the headline (debounced so half-typed titles don't churn
@@ -362,13 +392,15 @@ function WorkspaceBoardPage() {
             </WithTooltip>
             <ShareButton />
             <FilterControl value={search.q} onChange={(q) => patchSearch({ q })} />
-            <GroupControl
-              value={rowField}
-              onChange={(next) =>
+            <BoardSettings
+              grouping={rowField}
+              onChangeGrouping={(next) =>
                 patchSearch({
                   group: next === null ? "none" : next === "label" ? "label" : "folder",
                 })
               }
+              trackChanges={trackChanges}
+              onChangeTrackChanges={setTrackChanges}
             />
           </div>
           <div className="sm:hidden">
@@ -452,6 +484,7 @@ function WorkspaceBoardPage() {
           openTask === null ? Promise.resolve(null) : renameTask(openTask, nextPath)
         }
         editorEpoch={editorEpoch}
+        redline={trackChanges}
         editorApiRef={editorApiRef}
         focusHeadline={
           openTask !== null && openTask.path === draftPath

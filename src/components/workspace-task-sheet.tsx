@@ -2,6 +2,7 @@ import { lazy, Suspense, useState } from "react";
 import { RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { Input } from "../ui/input.tsx";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../ui/sheet.tsx";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs.tsx";
 import { Button } from "../ui/button.tsx";
 import {
   Select,
@@ -32,6 +33,11 @@ const WorkspaceTaskEditor = lazy(() =>
     default: module.WorkspaceTaskEditor,
   })),
 );
+const WorkspaceTaskPreview = lazy(() =>
+  import("./workspace-task-preview.tsx").then((module) => ({
+    default: module.WorkspaceTaskPreview,
+  })),
+);
 
 /**
  * The task detail sheet on the WORKSPACE lane: the shared collab-editor
@@ -48,6 +54,7 @@ export function WorkspaceTaskSheet({
   onRename,
   focusHeadline,
   editorEpoch,
+  redline,
   editorApiRef,
   onLiveContent,
   onChangeState,
@@ -68,6 +75,8 @@ export function WorkspaceTaskSheet({
   /** Bumped when the session was ended server-side (revert) — remounts the
    * editor so it reseeds instead of showing the dead session's text. */
   editorEpoch?: number;
+  /** Track changes: the redline layer on the editor (board setting). */
+  redline?: boolean;
   editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
@@ -94,6 +103,7 @@ export function WorkspaceTaskSheet({
             onRename={onRename}
             focusHeadline={focusHeadline}
             editorEpoch={editorEpoch}
+            redline={redline}
             editorApiRef={editorApiRef}
             onLiveContent={onLiveContent}
             onChangeState={onChangeState}
@@ -117,6 +127,7 @@ function SheetBody({
   onRename,
   focusHeadline,
   editorEpoch,
+  redline,
   editorApiRef,
   onLiveContent,
   onChangeState,
@@ -136,6 +147,8 @@ function SheetBody({
   /** Bumped when the session was ended server-side (revert) — remounts the
    * editor so it reseeds instead of showing the dead session's text. */
   editorEpoch?: number;
+  /** Track changes: the redline layer on the editor (board setting). */
+  redline?: boolean;
   editorApiRef?: { current: import("../lib/collab-editor-api.ts").CollabEditorApi | null };
   onLiveContent: (path: string, content: string) => void;
   onChangeState: (state: string) => void;
@@ -266,6 +279,19 @@ function SheetBody({
           </AlertDialog>
         </div>
       </div>
+      <Tabs defaultValue="editor" className="flex min-h-0 flex-1 flex-col gap-0">
+        <div className="flex shrink-0 items-center border-b px-4 py-1.5">
+          <TabsList className="h-8">
+            <TabsTrigger value="editor">Editor</TabsTrigger>
+            <TabsTrigger value="preview">Preview</TabsTrigger>
+          </TabsList>
+        </div>
+        <TabsContent value="preview" className="flex min-h-0 flex-1 flex-col">
+          <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Rendering…</p>}>
+            <WorkspaceTaskPreview source={task.source} />
+          </Suspense>
+        </TabsContent>
+        <TabsContent value="editor" keepMounted className="flex min-h-0 flex-1 flex-col data-[hidden]:hidden">
       <Suspense
         fallback={<p className="p-4 text-sm text-muted-foreground">Loading editor…</p>}
       >
@@ -274,13 +300,15 @@ function SheetBody({
           checkoutId={checkoutId}
           repoPath={repoPath}
           path={task.path}
-          redline={true}
+          redline={redline ?? true}
           focusHeadline={focusHeadline}
           apiRef={editorApiRef}
           onLiveContent={onLiveContent}
           onStatus={setStatus}
         />
       </Suspense>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -123,7 +123,8 @@ export function Board({
                 // group hands the slot to the next bar — pure CSS.
                 <header className="sticky top-10 z-10 min-w-full border-y border-border/40 bg-muted">
                   <div className="mx-auto min-w-0" style={{ width: contentWidth }}>
-                    <div className="sticky left-0 flex h-9 w-fit max-w-[100vw] items-center gap-2 px-3 text-sm font-medium">
+                    {/* Columns sit inside px-2 + per-column px-3 (20px = pl-5): the row icon left edge aligns with the column icon. */}
+                    <div className="sticky left-0 flex h-9 w-fit max-w-[100vw] items-center gap-2 pr-3 pl-5 text-sm font-medium">
                     {rowField === "folder" ? (
                       <FolderIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                     ) : (
