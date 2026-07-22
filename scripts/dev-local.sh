@@ -53,5 +53,5 @@ nohup node "$TASKS_DIR/scripts/local-proxy.mjs" "$PROXY_PORT" "$TASKS_PORT" "$PR
   > /tmp/tasks-proxy.log 2>&1 &
 sleep 0.5
 echo
-echo "open:     http://localhost:$PROXY_PORT   (token expires in 15 min — rerun to refresh)"
+echo "open:     http://localhost:$PROXY_PORT/w/local-review   (token expires in 15 min — rerun to refresh)"
 echo "probes:   node scripts/probe-rpc.mjs http://localhost:$TASKS_PORT $PROJECT_ID <token> <checkoutId>"

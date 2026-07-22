@@ -101,6 +101,16 @@ cp .dev.vars.example .dev.vars
 pnpm dev
 ```
 
+For a fully local browser session, including a local Iterate backend and a
+project-session proxy, use the harness from the workspace-collaboration branch:
+
+```bash
+OS_DIR=/path/to/iterate/apps/os ./scripts/dev-local.sh plannotator-local
+```
+
+Open the printed `/w/local-review` URL. Add or open a task, then switch it to
+Review. Rerun the harness when its 15-minute local token expires.
+
 `.dev.vars.example` points `OS_BASE_URL` at `https://os.iterate.com` — the
 develop-against-production loop below, which is the loop you usually want.
 Point it at a local os dev server (`http://localhost:<port>`) to run fully

@@ -58,6 +58,8 @@ of task markdown.
 - 2026-07-22: Verified the built Worker at localhost with two isolated headed browsers. One browser
   saw the other's new and edited annotations without reload; refresh restored durable state; a
   selected-text comment retained the exact quote `Select this sentence` and the verified author.
+- 2026-07-22: Pointed the fully-local harness at `/w/local-review` and documented the command so
+  reviewers land on the workspace-backed lane that contains Review mode.
 - 2026-07-22: Plannotator's rich Viewer remains a lazy ~1 MB gzip chunk and its published source
   makes Vite's first source-mode review compile expensive. Edit/board startup is unaffected; a
   slimmer upstream document-only entrypoint would be the clean follow-up.
