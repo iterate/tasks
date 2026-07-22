@@ -196,7 +196,11 @@ function WorkspaceBoardPage() {
           message?.trim() || fallbackCommitMessage(board.taskChanges),
         );
         // The redline baseline advanced: reseat an open editor so committed
-        // work stops wearing marks (same lever revert/discard use).
+        // work stops wearing marks (same lever revert/discard use). The
+        // commit also ends any draft — the reseat must not replay its
+        // focus intent.
+        setDraftPath(null);
+        draftFocusRef.current = undefined;
         if (searchTaskRef.current !== "") setEditorEpoch((current) => current + 1);
         return result;
       } catch (cause) {
@@ -573,10 +577,20 @@ function WorkspaceBoardPage() {
         onDelete={() => {
           if (openTask !== null) {
             board.deleteTask(openTask.path);
+            if (openTask.path === draftPath) {
+              setDraftPath(null);
+              draftFocusRef.current = undefined;
+            }
             patchSearch({ task: "" });
           }
         }}
-        onClose={() => patchSearch({ task: "" })}
+        onClose={() => {
+          // Closing ends the draft ritual (Yjs-board parity): reopening the
+          // same task is an ordinary open, no focus steal, no title trail.
+          setDraftPath(null);
+          draftFocusRef.current = undefined;
+          patchSearch({ task: "" });
+        }}
       />
     </>
   );
