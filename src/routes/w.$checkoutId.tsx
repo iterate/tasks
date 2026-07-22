@@ -195,6 +195,10 @@ function WorkspaceBoardPage() {
         if (!applyLive(task.path, transform)) board.writeTask(task.path, transform(sourceOf(task)));
         return;
       }
+      // ONE rename at a time (same lock as the path input and the draft
+      // timer): an overlapping drag would interleave write/delete sequences
+      // and the first .finally would clear the lock under the second.
+      if (renamingRef.current) return;
       // Never collapse onto an existing file in the target folder — suffix.
       const nextPath = claimPath(taskPathInFolder(task.path, folder));
       const wasOpen = search.task === task.path;

@@ -36,6 +36,7 @@ export function StreamEventsSheet({
     lastOffset.current = -1;
     let handle: { ping?(): Promise<boolean> | boolean; unsubscribe(): void } | null = null;
     let cancelled = false;
+    let connecting = false;
 
     const onBatch = (batch: WorkspaceStreamEvent[]) => {
       if (cancelled) return;
@@ -51,12 +52,15 @@ export function StreamEventsSheet({
     };
 
     const connect = (afterOffset: number) => {
+      connecting = true;
       subscribe(onBatch, Math.max(0, afterOffset)).then(
         (opened) => {
+          connecting = false;
           if (cancelled) opened.unsubscribe();
           else handle = opened;
         },
         (cause: unknown) => {
+          connecting = false;
           if (!cancelled) setStatus(cause instanceof Error ? cause.message : String(cause));
         },
       );
@@ -68,7 +72,16 @@ export function StreamEventsSheet({
     // handle and resubscribe from the last seen offset when it dies.
     const heartbeat = setInterval(() => {
       void (async () => {
-        if (cancelled || handle === null) return;
+        if (cancelled) return;
+        if (handle === null) {
+          // A failed (re)connect must keep retrying — a dead handle with no
+          // retry would leave the sheet reading "live" forever.
+          if (!connecting) {
+            setStatus("reconnecting…");
+            connect(lastOffset.current);
+          }
+          return;
+        }
         try {
           if ((await handle.ping?.()) === false) throw new Error("subscription lapsed");
         } catch {

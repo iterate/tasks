@@ -175,25 +175,46 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     return next.sort((left, right) => left.path.localeCompare(right.path));
   }, [files]);
 
-  /** Optimistic local write + the same platform write an agent would make. */
+  /** Optimistic local write + the same platform write an agent would make;
+   * an RPC failure restores the prior card and badge (no phantom adds or
+   * stale edits waiting on a poll to reconcile). */
   const writeTask = useCallback(
     (path: string, content: string) => {
       mutationEpoch.current++;
+      let priorContent: string | undefined;
+      let priorChange: TaskChangeStatus | undefined;
       setFiles((current) => {
+        priorContent = current?.[path];
         // The transition needs to know if the path existed BEFORE this write
         // (unknown path = an ADD, not a modification), so status updates
         // inside the same setter that sees the pre-write files.
-        setChanges((changes) =>
-          new Map(changes).set(
+        setChanges((changes) => {
+          priorChange = changes.get(path);
+          return new Map(changes).set(
             path,
             changeAfterWrite(changes.get(path), current?.[path] !== undefined),
-          ),
-        );
+          );
+        });
         return current === null ? current : { ...current, [path]: content };
       });
-      void lane((ws) => ws.write(`/${path}`, content)).catch((cause: unknown) =>
-        setError(cause instanceof Error ? cause.message : String(cause)),
-      );
+      void lane((ws) => ws.write(`/${path}`, content)).catch((cause: unknown) => {
+        mutationEpoch.current++;
+        setError(cause instanceof Error ? cause.message : String(cause));
+        setFiles((current) => {
+          if (current === null) return current;
+          if (priorContent === undefined) {
+            const { [path]: _gone, ...rest } = current;
+            return rest;
+          }
+          return { ...current, [path]: priorContent };
+        });
+        setChanges((current) => {
+          const next = new Map(current);
+          if (priorChange === undefined) next.delete(path);
+          else next.set(path, priorChange);
+          return next;
+        });
+      });
     },
     [lane],
   );
