@@ -77,6 +77,9 @@ function WorkspaceBoardPage() {
   // live document (the board mirror is 200ms behind it — writing board state
   // over a live path would drop the newest keystrokes).
   const editorApiRef = useRef<CollabEditorApi | null>(null);
+  // ONE rename at a time: a second write/delete sequence starting while the
+  // first is mid-flight could duplicate files or delete the wrong source.
+  const renamingRef = useRef(false);
   // Paths claimed by mutations THIS RENDER: board.files is async React
   // state, so two rapid adds/moves in one frame would both see it stale and
   // collapse onto one filename without this synchronous guard. Claims are
@@ -199,9 +202,14 @@ function WorkspaceBoardPage() {
       // path that doesn't exist yet (racing the create), and the old editor
       // keeps the user's text until then. The final-frame carry runs after
       // the navigation unmounts it.
-      void board.renameTask(task.path, nextPath, transform(sourceOf(task)), transform, () => {
-        if (wasOpen) patchSearch({ task: nextPath });
-      });
+      renamingRef.current = true;
+      void board
+        .renameTask(task.path, nextPath, transform(sourceOf(task)), transform, () => {
+          if (wasOpen) patchSearch({ task: nextPath });
+        })
+        .finally(() => {
+          renamingRef.current = false;
+        });
     },
     [applyLive, board, claimPath, patchSearch, search.task, sourceOf],
   );
@@ -254,6 +262,9 @@ function WorkspaceBoardPage() {
     const desired = taskPathInFolder(taskPathForTitle(draftTitle), draftFolder);
     if (desired === draftPath) return;
     const timer = setTimeout(() => {
+      // An in-flight rename owns the draft: skip; onWritten changes
+      // draftPath, which re-runs this effect for any further title drift.
+      if (renamingRef.current) return;
       const current = boardRef.current;
       const task = current.tasks.find((candidate) => candidate.path === draftPath);
       if (task === undefined || current.changes.get(draftPath) !== "added") return;
@@ -265,11 +276,16 @@ function WorkspaceBoardPage() {
       const target = claimPath(desired);
       // Navigation waits for the write to land (never open a not-yet-created
       // path); on failure nothing moved, so nothing to roll back.
-      void current.renameTask(draftPath, target, source, (final) => final, () => {
-        renamedDraftRef.current = true;
-        setDraftPath(target);
-        patchSearch({ task: target });
-      });
+      renamingRef.current = true;
+      void current
+        .renameTask(draftPath, target, source, (final) => final, () => {
+          renamedDraftRef.current = true;
+          setDraftPath(target);
+          patchSearch({ task: target });
+        })
+        .finally(() => {
+          renamingRef.current = false;
+        });
     }, 700);
     return () => clearTimeout(timer);
   }, [draftPath, draftTitle, draftFolder, claimPath, patchSearch, sourceOf]);
@@ -284,11 +300,17 @@ function WorkspaceBoardPage() {
         return 'Path must be a .md file inside a folder named "tasks".';
       if (nextPath === task.path) return null;
       if (board.files?.[nextPath] !== undefined) return "A file already exists at that path.";
+      if (renamingRef.current) return "A rename is already in progress — retry in a moment.";
       const wasOpen = search.task === task.path;
-      void board.renameTask(task.path, nextPath, sourceOf(task), (final) => final, () => {
-        setDraftPath((current) => (current === task.path ? nextPath : current));
-        if (wasOpen) patchSearch({ task: nextPath });
-      });
+      renamingRef.current = true;
+      void board
+        .renameTask(task.path, nextPath, sourceOf(task), (final) => final, () => {
+          setDraftPath((current) => (current === task.path ? nextPath : current));
+          if (wasOpen) patchSearch({ task: nextPath });
+        })
+        .finally(() => {
+          renamingRef.current = false;
+        });
       return null;
     },
     [board, patchSearch, search.task, sourceOf],
@@ -347,7 +369,13 @@ function WorkspaceBoardPage() {
             canCommit={true}
             onMakeCommit={commit.makeCommit}
             onWriteCommitMessage={commit.writeCommitMessage}
-            onDiscardAll={board.discardAll}
+            onDiscardAll={() => {
+              // Discard ends every changed file's session — reseat the open
+              // editor afterwards exactly like a single revert does.
+              void board.discardAll().then(() => {
+                if (search.task !== "") setEditorEpoch((current) => current + 1);
+              });
+            }}
           />
         </div>
       </header>
@@ -409,8 +437,11 @@ function WorkspaceBoardPage() {
         }
         onRevert={() => {
           if (openTask === null) return;
-          board.revertTask(openTask.path);
-          setEditorEpoch((current) => current + 1);
+          // Remount only AFTER the revert RPC ended the old session — an
+          // early remount would attach to the dying session and see it end.
+          void board.revertTask(openTask.path).then(() => {
+            setEditorEpoch((current) => current + 1);
+          });
         }}
         onDelete={() => {
           if (openTask !== null) {

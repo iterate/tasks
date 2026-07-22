@@ -319,10 +319,13 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   );
 
   /** Back to the mount's version — restore a delete, drop an add, undo edits. */
+  /** Resolves once the revert RPC landed and local state reflects it — the
+   * route remounts open editors AFTER this (the platform ended the file's
+   * session; an early remount would attach to the dying one). */
   const revertTask = useCallback(
-    (path: string) => {
+    (path: string): Promise<void> => {
       mutationEpoch.current++;
-      void lane(async (ws) => {
+      return lane(async (ws) => {
         await ws.revert(`/${path}`);
         mutationEpoch.current++;
         const content = await ws.read(`/${path}`);
@@ -345,9 +348,12 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
     [lane],
   );
 
-  const discardAll = useCallback(() => {
-    for (const path of changes.keys()) revertTask(path);
-  }, [changes, revertTask]);
+  const discardAll = useCallback(
+    async (): Promise<void> => {
+      await Promise.all([...changes.keys()].map((path) => revertTask(path)));
+    },
+    [changes, revertTask],
+  );
 
   const commit = useCallback(
     async (message: string) => {
