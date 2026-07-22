@@ -244,10 +244,12 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
   );
 
   /**
-   * Rename = optimistic swap, but the DELETE waits for the write to land:
-   * a failed create must roll the board back, never drop the source file.
-   * `carry` folds a final-frame keystroke (still on the dying session) onto
-   * the new path before the delete discards that session.
+   * Rename: NOTHING moves locally until the write RPC lands — the open
+   * sheet must keep its editor (and the user's text) mounted on the old
+   * path until the target exists; a failed create then needs no rollback.
+   * On success the local swap applies, `onWritten` fires (navigation), the
+   * final-frame carry folds a last keystroke from the dying session onto
+   * the new path, and only then is the source deleted.
    */
   const renameTask = useCallback(
     async (
@@ -258,11 +260,14 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       /** Runs once the write RPC landed — the moment navigation is safe. */
       onWritten?: () => void,
     ): Promise<boolean> => {
+      try {
+        await lane((ws) => ws.write(`/${toPath}`, content));
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+        return false;
+      }
       mutationEpoch.current++;
-      let fromContent: string | undefined;
-      let fromChange: TaskChangeStatus | undefined;
       setChanges((current) => {
-        fromChange = current.get(fromPath);
         const next = new Map(current);
         next.set(toPath, changeAfterWrite(current.get(toPath), false));
         const transitioned = changeAfterDelete(current.get(fromPath));
@@ -272,29 +277,9 @@ export function useWorkspaceBoard(checkoutId: string, repoPath: string) {
       });
       setFiles((current) => {
         if (current === null) return current;
-        fromContent = current[fromPath];
         const { [fromPath]: _gone, ...rest } = current;
         return { ...rest, [toPath]: content };
       });
-      try {
-        await lane((ws) => ws.write(`/${toPath}`, content));
-      } catch (cause) {
-        mutationEpoch.current++;
-        setFiles((current) => {
-          if (current === null) return current;
-          const { [toPath]: _added, ...rest } = current;
-          return fromContent === undefined ? rest : { ...rest, [fromPath]: fromContent };
-        });
-        setChanges((current) => {
-          const next = new Map(current);
-          next.delete(toPath);
-          if (fromChange === undefined) next.delete(fromPath);
-          else next.set(fromPath, fromChange);
-          return next;
-        });
-        setError(cause instanceof Error ? cause.message : String(cause));
-        return false;
-      }
       onWritten?.();
       try {
         const final = await lane((ws) => ws.read(`/${fromPath}`));
