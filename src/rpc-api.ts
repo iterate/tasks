@@ -163,7 +163,7 @@ export class TasksProjectApi extends RpcTarget implements TasksProject {
     if (!isCheckoutId(checkoutId) || normalized === null) {
       throw new Error("bad checkout id or repo path");
     }
-    return new TasksWorkspaceApi(this.#dial, checkoutId, normalized);
+    return new TasksWorkspaceApi(this.#env, this.#projectId, this.#dial, checkoutId, normalized);
   }
 
   [Symbol.dispose](): void {
@@ -309,16 +309,44 @@ type WorkspaceStub = {
  * barriers).
  */
 export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
+  readonly #env: AppEnv;
+  readonly #projectId: string;
   readonly #dial: ProjectDial;
   readonly #checkoutId: string;
   readonly #repoPath: string;
   #created = false;
+  #indexed = false;
 
-  constructor(dial: ProjectDial, checkoutId: string, repoPath: string) {
+  constructor(
+    env: AppEnv,
+    projectId: string,
+    dial: ProjectDial,
+    checkoutId: string,
+    repoPath: string,
+  ) {
     super();
+    this.#env = env;
+    this.#projectId = projectId;
     this.#dial = dial;
     this.#checkoutId = checkoutId;
     this.#repoPath = repoPath;
+  }
+
+  /**
+   * The sidebar and home page list checkouts from the index DO — a checkout
+   * that never announces itself does not exist for navigation. Announce on
+   * first successful use (once per capability) and on every commit (bumps
+   * recency + records the commit). Fire-and-forget: the index is a
+   * convenience surface and must never fail a real operation.
+   */
+  #announce(baseCommit?: string): void {
+    if (baseCommit === undefined) {
+      if (this.#indexed) return;
+      this.#indexed = true;
+    }
+    void this.#env.INDEX.getByName(this.#projectId)
+      .record({ repoPath: this.#repoPath, checkoutId: this.#checkoutId, baseCommit })
+      .catch(() => undefined);
   }
 
   get #workspacePath(): string {
@@ -336,7 +364,9 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
       // silently bind to (and edit) the first repository's workspace.
       const ws = workspaces.get(this.#workspacePath);
       try {
-        return await operation(ws);
+        const result = await operation(ws);
+        this.#announce();
+        return result;
       } catch (error) {
         // Only the workspace-missing error (exact platform phrasing) triggers
         // lazy creation — a file-level "does not exist" must surface as-is.
@@ -352,6 +382,7 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
         // a transient create failure must not wedge this held capability.
         const result = await operation(ws);
         this.#created = true;
+        this.#announce();
         return result;
       }
     });
@@ -498,8 +529,11 @@ export class TasksWorkspaceApi extends RpcTarget implements TasksWorkspace {
     return this.#withWorkspace((ws) => ws.git.status());
   }
 
-  commit(message: string): Promise<unknown> {
-    return this.#withWorkspace((ws) => ws.git.commit({ message }));
+  async commit(message: string): Promise<unknown> {
+    const result = await this.#withWorkspace((ws) => ws.git.commit({ message }));
+    const commitOid = (result as { commitOid?: unknown } | null)?.commitOid;
+    this.#announce(typeof commitOid === "string" ? commitOid : undefined);
+    return result;
   }
 
   log(limit = 5): Promise<unknown> {

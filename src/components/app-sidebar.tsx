@@ -8,6 +8,7 @@ import { IterateLogo } from "../ui/iterate-logo.tsx";
 import {
   Sidebar,
   SidebarContent,
+  SidebarRail,
   SidebarGroup,
   SidebarGroupAction,
   SidebarGroupContent,
@@ -31,10 +32,10 @@ export function AppSidebar() {
   const navigate = useNavigate();
   const location = useRouterState({ select: (state) => state.location });
   const activeCheckoutId = decodeURIComponent(
-    /^\/c\/([^/]+)/.exec(location.pathname)?.[1] ?? "",
+    /^\/(?:c|w)\/([^/]+)/.exec(location.pathname)?.[1] ?? "",
   );
-  const activeRepoPath =
-    ((location.search as { repoPath?: string }).repoPath ?? "") || DEFAULT_REPO_PATH;
+  const search = location.search as { repo?: string; repoPath?: string };
+  const activeRepoPath = (search.repo ?? search.repoPath ?? "") || DEFAULT_REPO_PATH;
 
   const [repos, setRepos] = useState<string[]>([]);
   const [checkouts, setCheckouts] = useState<CheckoutIndexEntry[]>([]);
@@ -86,14 +87,14 @@ export function AppSidebar() {
 
   const openNewCheckout = (repoPath: string) => {
     void navigate({
-      to: "/c/$checkoutId",
+      to: "/w/$checkoutId",
       params: { checkoutId: newCheckoutId() },
-      search: repoPath === DEFAULT_REPO_PATH ? {} : { repoPath },
+      search: { group: "folder", q: "", repo: repoPath, task: "" },
     });
   };
 
   return (
-    <Sidebar collapsible="offcanvas">
+    <Sidebar collapsible="icon">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -111,7 +112,7 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         {groups.map(([repoPath, entries]) => (
-          <SidebarGroup key={repoPath}>
+          <SidebarGroup key={repoPath} className="group-data-[collapsible=icon]:hidden">
             <SidebarGroupLabel className="gap-1.5">
               <FolderGit2Icon className="size-3.5" aria-hidden />
               <span className="truncate font-mono">{repoLabel(repoPath)}</span>
@@ -141,9 +142,9 @@ export function AppSidebar() {
                         tooltip={entry.checkoutId}
                         render={
                           <Link
-                            to="/c/$checkoutId"
+                            to="/w/$checkoutId"
                             params={{ checkoutId: entry.checkoutId }}
-                            search={repoPath === DEFAULT_REPO_PATH ? {} : { repoPath }}
+                            search={{ group: "folder", q: "", repo: repoPath, task: "" }}
                           />
                         }
                       >
@@ -162,6 +163,7 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
+      <SidebarRail />
     </Sidebar>
   );
 }

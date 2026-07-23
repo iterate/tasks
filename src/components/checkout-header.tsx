@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -37,6 +37,10 @@ export function projectSlug(): string {
   return match?.[1] ?? window.location.hostname;
 }
 
+/** Server-derived project label (root loader) — SSR and client agree, so the
+ * breadcrumb never flashes a placeholder. */
+export const ProjectLabelContext = createContext("tasks");
+
 /** project › repo › checkout — the header's orientation line. */
 export function CheckoutBreadcrumbs({
   repoPath,
@@ -45,11 +49,12 @@ export function CheckoutBreadcrumbs({
   repoPath?: string;
   checkoutId?: string;
 }) {
+  const projectLabel = useContext(ProjectLabelContext);
   return (
     <Breadcrumb className="min-w-0">
       <BreadcrumbList className="flex-nowrap text-xs">
         <BreadcrumbItem>
-          <BreadcrumbLink render={<Link to="/" />}>{projectSlug()}</BreadcrumbLink>
+          <BreadcrumbLink render={<Link to="/" />}>{projectLabel}</BreadcrumbLink>
         </BreadcrumbItem>
         {repoPath === undefined ? null : (
           <>
